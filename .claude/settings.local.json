@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Read(//mnt/c/development/workspace2/farm-reports/**)",
+      "Bash(mvn dependency:resolve -q)",
+      "Bash(mvn compile:*)",
+      "Bash(npx expo:*)",
+      "Bash(npm install:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(xargs -I{} sh -c 'echo \"=== {} ===\" && cat \"{}\"')",
+      "Bash(ls C:/development/workspace2/farm-reports/mobile/.env*)",
+      "Bash(mkdir -p C:/development/workspace2/farm-reports/mobile/assets)",
+      "Bash(npx create-expo-app:*)"
+    ]
+  }
+}
