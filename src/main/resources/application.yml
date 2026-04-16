@@ -3,9 +3,9 @@ spring:
     name: farm-reports-api
 
   datasource:
-    url: ${JDBC_DATABASE_URL:jdbc:postgresql://localhost:5432/farm_reports}
-    username: ${DB_USERNAME:farm_user}
-    password: ${DB_PASSWORD:}
+    url: jdbc:postgresql://${PGHOST:localhost}:${PGPORT:5432}/${PGDATABASE:farm_reports}
+    username: ${PGUSER:${DB_USERNAME:farm_user}}
+    password: ${PGPASSWORD:${DB_PASSWORD:}}
     driver-class-name: org.postgresql.Driver
 
   jpa:
