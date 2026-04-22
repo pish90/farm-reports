@@ -265,7 +265,7 @@ public class ExportService {
             row.createCell(0).setCellValue(e.entryNo());
             row.createCell(1).setCellValue(e.date() != null ? e.date().format(DATE_FMT) : "");
             row.createCell(2).setCellValue(e.supplierContractor() != null ? e.supplierContractor() : "");
-            row.createCell(3).setCellValue(e.refNo() != null ? e.refNo() : "");
+            row.createCell(3).setCellValue(e.receiptNo() != null ? e.receiptNo() : "");
             double cost = e.cost() != null ? e.cost().doubleValue() : 0;
             Cell cc = row.createCell(4);
             cc.setCellValue(cost);

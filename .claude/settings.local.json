@@ -11,7 +11,17 @@
       "Bash(xargs -I{} sh -c 'echo \"=== {} ===\" && cat \"{}\"')",
       "Bash(ls C:/development/workspace2/farm-reports/mobile/.env*)",
       "Bash(mkdir -p C:/development/workspace2/farm-reports/mobile/assets)",
-      "Bash(npx create-expo-app:*)"
+      "Bash(npx create-expo-app:*)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(npm cache *)",
+      "Bash(eas *)",
+      "Bash(python3 -c \"import sys,json; [print\\(json.loads\\(l\\).get\\('content',''\\)[:500] if isinstance\\(json.loads\\(l\\).get\\('content'\\), str\\) else ''\\) for l in sys.stdin if l.strip\\(\\)]\")",
+      "Bash(python3 *)",
+      "Bash(mvn -q compile exec:java -Dexec.mainClass=\"com.farmreports.api.util.HashGen\")",
+      "Bash(node -e ' *)",
+      "Bash(npx tsc *)"
     ]
   }
 }

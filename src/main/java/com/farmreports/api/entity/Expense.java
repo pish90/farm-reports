@@ -7,6 +7,8 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "expenses")
@@ -32,9 +34,23 @@ public class Expense {
     @Column(name = "supplier_contractor")
     private String supplierContractor;
 
-    @Column(name = "ref_no", length = 100)
-    private String refNo;
+    @Column(name = "receipt_no", length = 100)
+    private String receiptNo;
 
     @Column(nullable = false, precision = 10, scale = 2)
     private BigDecimal cost;
+
+    @Column(length = 500)
+    private String description;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private ExpenseCategory category;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "business_unit_id")
+    private BusinessUnit businessUnit;
+
+    @OneToMany(mappedBy = "expense", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<ExpenseApportionment> apportionments = new ArrayList<>();
 }

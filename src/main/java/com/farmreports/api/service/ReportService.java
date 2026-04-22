@@ -5,6 +5,7 @@ import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
@@ -26,6 +27,9 @@ public class ReportService {
     private final LivestockTypeRepository livestockTypeRepository;
     private final FarmRepository farmRepository;
     private final UserRepository userRepository;
+    private final ExpenseCategoryRepository categoryRepository;
+    private final BusinessUnitRepository businessUnitRepository;
+    private final JdbcTemplate jdbc;
 
     @Transactional(readOnly = true)
     public ReportDto getReport(Integer farmId, Integer year, Integer month) {
@@ -65,6 +69,32 @@ public class ReportService {
         }).toList();
 
         attendanceRepository.saveAll(records);
+    }
+
+    public void upsertAttendanceNotes(Integer reportId, Integer farmId, NoteRequest request) {
+        loadReportForFarm(reportId, farmId);
+        jdbc.update("DELETE FROM attendance_worker_notes WHERE report_id = ?", reportId);
+        for (NoteRequest.NoteEntry entry : request.notes()) {
+            if (entry.note() != null && !entry.note().isBlank()) {
+                jdbc.update(
+                    "INSERT INTO attendance_worker_notes (report_id, worker_id, note) VALUES (?, ?, ?)",
+                    reportId, entry.subjectId(), entry.note().trim()
+                );
+            }
+        }
+    }
+
+    public void upsertLivestockNotes(Integer reportId, Integer farmId, NoteRequest request) {
+        loadReportForFarm(reportId, farmId);
+        jdbc.update("DELETE FROM livestock_category_notes WHERE report_id = ?", reportId);
+        for (NoteRequest.NoteEntry entry : request.notes()) {
+            if (entry.subjectKey() != null && entry.note() != null && !entry.note().isBlank()) {
+                jdbc.update(
+                    "INSERT INTO livestock_category_notes (report_id, category, note) VALUES (?, ?, ?)",
+                    reportId, entry.subjectKey(), entry.note().trim()
+                );
+            }
+        }
     }
 
     public void upsertLivestock(Integer reportId, Integer farmId, List<LivestockEntryRequest> entries) {
@@ -110,8 +140,28 @@ public class ReportService {
             exp.setEntryNo(e.entryNo());
             exp.setDate(e.date());
             exp.setSupplierContractor(e.supplierContractor());
-            exp.setRefNo(e.refNo());
+            exp.setReceiptNo(e.receiptNo());
             exp.setCost(e.cost());
+            exp.setDescription(e.description());
+
+            if (e.categoryId() != null) {
+                exp.setCategory(categoryRepository.getReferenceById(e.categoryId()));
+            }
+            if (e.businessUnitId() != null) {
+                exp.setBusinessUnit(businessUnitRepository.getReferenceById(e.businessUnitId()));
+            }
+
+            if (e.apportionments() != null) {
+                for (ExpenseEntryRequest.ApportionmentRequest ap : e.apportionments()) {
+                    ExpenseApportionment apportionment = new ExpenseApportionment();
+                    apportionment.setExpense(exp);
+                    apportionment.setBusinessUnit(businessUnitRepository.getReferenceById(ap.businessUnitId()));
+                    apportionment.setPercentage(ap.percentage());
+                    apportionment.setAmount(ap.amount());
+                    exp.getApportionments().add(apportionment);
+                }
+            }
+
             return exp;
         }).toList();
 
@@ -190,8 +240,23 @@ public class ReportService {
                         e.getEntryNo(),
                         e.getDate(),
                         e.getSupplierContractor(),
-                        e.getRefNo(),
-                        e.getCost()))
+                        e.getReceiptNo(),
+                        e.getCost(),
+                        e.getDescription(),
+                        e.getCategory() != null ? e.getCategory().getId() : null,
+                        e.getCategory() != null ? e.getCategory().getAccountCode() : null,
+                        e.getCategory() != null ? e.getCategory().getAccountName() : null,
+                        e.getBusinessUnit() != null ? e.getBusinessUnit().getId() : null,
+                        e.getBusinessUnit() != null ? e.getBusinessUnit().getCode() : null,
+                        e.getBusinessUnit() != null ? e.getBusinessUnit().getName() : null,
+                        e.getApportionments().stream()
+                                .map(ap -> new ExpenseRecordDto.ApportionmentDto(
+                                        ap.getBusinessUnit().getId(),
+                                        ap.getBusinessUnit().getCode(),
+                                        ap.getBusinessUnit().getName(),
+                                        ap.getPercentage(),
+                                        ap.getAmount()))
+                                .toList()))
                 .toList();
 
         return new ReportDto(

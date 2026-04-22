@@ -9,7 +9,6 @@ import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -52,8 +51,7 @@ public class AuthController {
 
     @GetMapping("/me")
     public AuthResponse me(Authentication authentication) {
-        if (authentication == null || authentication instanceof AnonymousAuthenticationToken
-                || !(authentication instanceof UsernamePasswordAuthenticationToken)) {
+        if (!(authentication instanceof UsernamePasswordAuthenticationToken)) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
         }
 

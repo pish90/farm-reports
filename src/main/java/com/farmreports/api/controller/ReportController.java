@@ -1,6 +1,7 @@
 package com.farmreports.api.controller;
 
 import com.farmreports.api.dto.*;
+import com.farmreports.api.dto.NoteRequest;
 import com.farmreports.api.security.ClaimsHelper;
 import com.farmreports.api.service.ExportService;
 import com.farmreports.api.service.ReportService;
@@ -77,6 +78,24 @@ public class ReportController {
             @Valid @RequestBody List<@Valid ExpenseEntryRequest> entries,
             Authentication auth) {
         reportService.upsertExpenses(id, ClaimsHelper.getFarmId(auth), entries);
+        return ApiResponse.ok();
+    }
+
+    @PutMapping("/{id}/attendance-notes")
+    public ApiResponse<Void> upsertAttendanceNotes(
+            @PathVariable Integer id,
+            @Valid @RequestBody NoteRequest request,
+            Authentication auth) {
+        reportService.upsertAttendanceNotes(id, ClaimsHelper.getFarmId(auth), request);
+        return ApiResponse.ok();
+    }
+
+    @PutMapping("/{id}/livestock-notes")
+    public ApiResponse<Void> upsertLivestockNotes(
+            @PathVariable Integer id,
+            @Valid @RequestBody NoteRequest request,
+            Authentication auth) {
+        reportService.upsertLivestockNotes(id, ClaimsHelper.getFarmId(auth), request);
         return ApiResponse.ok();
     }
 
