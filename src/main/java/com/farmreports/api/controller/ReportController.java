@@ -104,6 +104,14 @@ public class ReportController {
         return ApiResponse.ok(reportService.submitReport(id, ClaimsHelper.getFarmId(auth)));
     }
 
+    @PostMapping("/{id}/reopen")
+    public ApiResponse<ReportDto> reopenReport(@PathVariable Integer id, Authentication auth) {
+        if (!"ADMIN".equals(ClaimsHelper.getRole(auth))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only admins can reopen reports");
+        }
+        return ApiResponse.ok(reportService.reopenReport(id, ClaimsHelper.getFarmId(auth)));
+    }
+
     @GetMapping("/{id}")
     public ApiResponse<ReportDto> getReportById(@PathVariable Integer id, Authentication auth) {
         return ApiResponse.ok(reportService.getReportById(
