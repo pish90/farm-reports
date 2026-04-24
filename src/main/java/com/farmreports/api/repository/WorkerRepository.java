@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface WorkerRepository extends JpaRepository<Worker, Integer> {
     List<Worker> findByFarmIdAndActiveTrue(Integer farmId);
     Optional<Worker> findByIdAndFarmId(Integer id, Integer farmId);
+    long countByFarmIdAndActiveTrue(Integer farmId);
 }

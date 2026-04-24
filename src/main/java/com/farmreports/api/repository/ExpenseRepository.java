@@ -16,4 +16,6 @@ public interface ExpenseRepository extends JpaRepository<Expense, Integer> {
 
     @Query("SELECT COALESCE(SUM(e.cost), 0) FROM Expense e WHERE e.report.farm.id = :farmId AND e.report.year = :year AND e.report.month = :month")
     BigDecimal sumCostByFarmAndYearAndMonth(@Param("farmId") Integer farmId, @Param("year") Integer year, @Param("month") Integer month);
+
+    long countByReportId(Integer reportId);
 }

@@ -1,6 +1,8 @@
 package com.farmreports.api.controller;
 
+import com.farmreports.api.dto.ApiResponse;
 import com.farmreports.api.dto.AuthResponse;
+import com.farmreports.api.dto.ChangePasswordRequest;
 import com.farmreports.api.dto.LoginRequest;
 import com.farmreports.api.entity.User;
 import com.farmreports.api.repository.UserRepository;
@@ -14,6 +16,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Map;
 
@@ -47,6 +51,27 @@ public class AuthController {
 
         return new AuthResponse(token, user.getId(), user.getFarm().getId(),
                 user.getFarm().getName(), user.getName());
+    }
+
+    @Transactional
+    @PutMapping("/password")
+    public ApiResponse<Void> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            Authentication authentication) {
+
+        Claims claims = (Claims) authentication.getPrincipal();
+        String email = claims.getSubject();
+
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Current password is incorrect");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        userRepository.save(user);
+        return ApiResponse.ok(null);
     }
 
     @GetMapping("/me")

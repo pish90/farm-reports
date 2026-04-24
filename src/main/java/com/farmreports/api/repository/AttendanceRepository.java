@@ -11,4 +11,7 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
     @Modifying(clearAutomatically = true)
     @Query("DELETE FROM Attendance a WHERE a.report.id = :reportId")
     void deleteByReportId(@Param("reportId") Integer reportId);
+
+    @Query("SELECT COUNT(DISTINCT a.dayOfMonth) FROM Attendance a WHERE a.report.id = :reportId")
+    long countDistinctDaysByReportId(@Param("reportId") Integer reportId);
 }

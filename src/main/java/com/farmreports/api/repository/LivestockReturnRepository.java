@@ -11,4 +11,6 @@ public interface LivestockReturnRepository extends JpaRepository<LivestockReturn
     @Modifying(clearAutomatically = true)
     @Query("DELETE FROM LivestockReturn lr WHERE lr.report.id = :reportId")
     void deleteByReportId(@Param("reportId") Integer reportId);
+
+    boolean existsByReportId(Integer reportId);
 }

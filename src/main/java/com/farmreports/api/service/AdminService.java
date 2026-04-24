@@ -1,13 +1,17 @@
 package com.farmreports.api.service;
 
+import com.farmreports.api.dto.FarmLiveStatusDto;
 import com.farmreports.api.dto.FarmSummaryDto;
 import com.farmreports.api.dto.ReportDto;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -23,6 +27,11 @@ public class AdminService {
     private final MonthlyReportRepository reportRepository;
     private final MilkProductionRepository milkRepository;
     private final ExpenseRepository expenseRepository;
+    private final AttendanceRepository attendanceRepository;
+    private final LivestockReturnRepository livestockReturnRepository;
+    private final WorkerRepository workerRepository;
+    private final UserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
 
     public List<FarmSummaryDto> getAllFarmSummaries() {
         int year = LocalDate.now().getYear();
@@ -42,6 +51,44 @@ public class AdminService {
                 expenses != null ? expenses.doubleValue() : 0.0
             );
         }).toList();
+    }
+
+    public List<FarmLiveStatusDto> getFarmLiveStatus(int year, int month) {
+        return farmRepository.findAll().stream().map(farm -> {
+            var report = reportRepository.findByFarmIdAndYearAndMonth(farm.getId(), year, month);
+
+            String reportStatus = report.map(r -> r.getStatus().name()).orElse("NOT_STARTED");
+            Integer reportId = report.map(MonthlyReport::getId).orElse(null);
+
+            long attendanceDays = reportId != null
+                    ? attendanceRepository.countDistinctDaysByReportId(reportId) : 0;
+            long expenseCount = reportId != null
+                    ? expenseRepository.countByReportId(reportId) : 0;
+            boolean livestockEntered = reportId != null
+                    && livestockReturnRepository.existsByReportId(reportId);
+
+            BigDecimal milk = milkRepository.sumLitresByFarmAndYearAndMonth(farm.getId(), year, month);
+            BigDecimal expenses = expenseRepository.sumCostByFarmAndYearAndMonth(farm.getId(), year, month);
+            long activeWorkers = workerRepository.countByFarmIdAndActiveTrue(farm.getId());
+
+            return new FarmLiveStatusDto(
+                    farm.getId(), farm.getName(), year, month,
+                    reportStatus, reportId,
+                    (int) activeWorkers, attendanceDays,
+                    milk != null ? milk.doubleValue() : 0.0,
+                    expenseCount,
+                    expenses != null ? expenses.doubleValue() : 0.0,
+                    livestockEntered
+            );
+        }).toList();
+    }
+
+    @Transactional
+    public void resetUserPassword(String email, String newPassword) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "No user found with that email"));
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
     }
 
     public List<ReportDto> listReports(Integer farmId, Integer year, Integer month, String status) {
