@@ -206,6 +206,17 @@ public class ReportService {
         return toDto(reportRepository.save(report));
     }
 
+    public ReportDto adminReopenReport(Integer reportId) {
+        MonthlyReport report = reportRepository.findById(reportId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report not found"));
+        if (report.getStatus() != ReportStatus.SUBMITTED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Report is not submitted");
+        }
+        report.setStatus(ReportStatus.DRAFT);
+        report.setSubmittedAt(null);
+        return toDto(reportRepository.save(report));
+    }
+
     @Transactional(readOnly = true)
     public ReportDto getReportById(Integer id, Integer farmId, String role) {
         MonthlyReport report;

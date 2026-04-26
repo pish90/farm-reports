@@ -109,7 +109,7 @@ public class ReportController {
         if (!"ADMIN".equals(ClaimsHelper.getRole(auth))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only admins can reopen reports");
         }
-        return ApiResponse.ok(reportService.reopenReport(id, ClaimsHelper.getFarmId(auth)));
+        return ApiResponse.ok(reportService.adminReopenReport(id));
     }
 
     @GetMapping("/{id}")

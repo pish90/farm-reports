@@ -24,19 +24,43 @@ public class ExportService {
     };
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 
+    public record FarmReport(String farmName, ReportDto report) {}
+
+    private record Styles(CellStyle header, CellStyle title, CellStyle num, CellStyle bold) {}
+
+    // ── Single-farm export ─────────────────────────────────────────────────────
+
     public byte[] generateExcel(ReportDto report) {
         try (XSSFWorkbook wb = new XSSFWorkbook();
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
 
-            CellStyle headerStyle = createHeaderStyle(wb);
-            CellStyle titleStyle  = createTitleStyle(wb);
-            CellStyle numStyle    = createNumStyle(wb);
-            CellStyle boldStyle   = createBoldStyle(wb);
+            Styles s = createStyles(wb);
+            int days = YearMonth.of(report.year(), report.month()).lengthOfMonth();
 
-            buildAttendanceSheet(wb, report, headerStyle, titleStyle, numStyle, boldStyle);
-            buildLivestockSheet(wb, report, headerStyle, titleStyle, numStyle, boldStyle);
-            buildMilkSheet(wb, report, headerStyle, titleStyle, numStyle, boldStyle);
-            buildExpensesSheet(wb, report, headerStyle, titleStyle, numStyle, boldStyle);
+            Sheet attSheet = wb.createSheet("Attendance");
+            buildAttendanceSection(attSheet, report, 0, s);
+            setAttendanceColumnWidths(attSheet, days);
+
+            Sheet liveSheet = wb.createSheet("Livestock Returns");
+            buildLivestockSection(liveSheet, report, 0, s);
+            liveSheet.setColumnWidth(0, 4000);
+            liveSheet.setColumnWidth(1, 5000);
+            liveSheet.setColumnWidth(2, 3000);
+
+            Sheet milkSheet = wb.createSheet("Milk Production");
+            buildMilkSection(milkSheet, report, 0, s);
+            milkSheet.setColumnWidth(0, 2000);
+            milkSheet.setColumnWidth(1, 3500);
+            milkSheet.setColumnWidth(2, 3500);
+            milkSheet.setColumnWidth(3, 3500);
+
+            Sheet expSheet = wb.createSheet("Expenses");
+            buildExpensesSection(expSheet, report, 0, s);
+            expSheet.setColumnWidth(0, 2000);
+            expSheet.setColumnWidth(1, 3500);
+            expSheet.setColumnWidth(2, 8000);
+            expSheet.setColumnWidth(3, 4000);
+            expSheet.setColumnWidth(4, 3500);
 
             wb.write(out);
             return out.toByteArray();
@@ -45,36 +69,69 @@ public class ExportService {
         }
     }
 
-    // ── Attendance ─────────────────────────────────────────────────────────────
+    // ── Multi-farm export (one sheet per farm, all sections stacked) ───────────
 
-    private void buildAttendanceSheet(XSSFWorkbook wb, ReportDto report,
-            CellStyle hdr, CellStyle title, CellStyle num, CellStyle bold) {
-        Sheet sheet = wb.createSheet("Attendance");
+    public byte[] generateAllFarmsExcel(int year, int month, List<FarmReport> farmReports) {
+        try (XSSFWorkbook wb = new XSSFWorkbook();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+            Styles s = createStyles(wb);
+            int days = YearMonth.of(year, month).lengthOfMonth();
+
+            for (FarmReport fr : farmReports) {
+                String raw = fr.farmName() != null ? fr.farmName() : "Farm " + fr.report().farmId();
+                String sheetName = raw.length() > 31 ? raw.substring(0, 31) : raw;
+                Sheet sheet = wb.createSheet(sheetName);
+
+                int row = 0;
+                row = buildAttendanceSection(sheet, fr.report(), row, s);
+                row += 2;
+                row = buildLivestockSection(sheet, fr.report(), row, s);
+                row += 2;
+                row = buildMilkSection(sheet, fr.report(), row, s);
+                row += 2;
+                buildExpensesSection(sheet, fr.report(), row, s);
+
+                // Column widths tuned for the attendance grid
+                sheet.setColumnWidth(0, 6000);
+                for (int d = 1; d <= Math.min(4, days); d++) sheet.setColumnWidth(d, 3000);
+                for (int d = 5; d <= days; d++) sheet.setColumnWidth(d, 1200);
+                sheet.setColumnWidth(days + 1, 2000);
+                sheet.setColumnWidth(days + 2, 2000);
+            }
+
+            wb.write(out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate Excel report", e);
+        }
+    }
+
+    // ── Section builders (return next available row index) ─────────────────────
+
+    private int buildAttendanceSection(Sheet sheet, ReportDto report, int startRow, Styles s) {
         int days = YearMonth.of(report.year(), report.month()).lengthOfMonth();
         List<AttendanceRecordDto> records = report.attendance() != null ? report.attendance() : List.of();
 
-        // Title row
-        Row titleRow = sheet.createRow(0);
+        Row titleRow = sheet.createRow(startRow);
         Cell tc = titleRow.createCell(0);
         tc.setCellValue("Attendance – " + MONTH_NAMES[report.month()] + " " + report.year());
-        tc.setCellStyle(title);
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, days + 2));
+        tc.setCellStyle(s.title());
+        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, days + 2));
 
-        // Header row
-        Row headerRow = sheet.createRow(1);
-        createHdrCell(headerRow, 0, "Worker", hdr);
-        for (int d = 1; d <= days; d++) createHdrCell(headerRow, d, String.valueOf(d), hdr);
-        createHdrCell(headerRow, days + 1, "Present", hdr);
-        createHdrCell(headerRow, days + 2, "Days", hdr);
+        Row headerRow = sheet.createRow(startRow + 1);
+        createHdrCell(headerRow, 0, "Worker", s.header());
+        for (int d = 1; d <= days; d++) createHdrCell(headerRow, d, String.valueOf(d), s.header());
+        createHdrCell(headerRow, days + 1, "Present", s.header());
+        createHdrCell(headerRow, days + 2, "Days", s.header());
 
-        // Group by worker name, preserving insertion order
         Map<String, Map<Integer, Boolean>> grid = new LinkedHashMap<>();
         for (AttendanceRecordDto r : records) {
             grid.computeIfAbsent(r.workerName(), k -> new HashMap<>()).put(r.dayOfMonth(), r.present());
         }
 
-        int rowIdx = 2;
-        int[] dayTotals = new int[days + 1]; // 1-based
+        int rowIdx = startRow + 2;
+        int[] dayTotals = new int[days + 1];
         for (Map.Entry<String, Map<Integer, Boolean>> e : grid.entrySet()) {
             Row row = sheet.createRow(rowIdx++);
             row.createCell(0).setCellValue(e.getKey());
@@ -90,56 +147,48 @@ public class ExportService {
             }
             Cell pc = row.createCell(days + 1);
             pc.setCellValue(presentCount);
-            pc.setCellStyle(num);
+            pc.setCellStyle(s.num());
             Cell dc = row.createCell(days + 2);
             dc.setCellValue(days);
-            dc.setCellStyle(num);
+            dc.setCellStyle(s.num());
         }
 
-        // Totals row
-        Row totalRow = sheet.createRow(rowIdx);
+        Row totalRow = sheet.createRow(rowIdx++);
         Cell tc2 = totalRow.createCell(0);
         tc2.setCellValue("TOTAL");
-        tc2.setCellStyle(bold);
+        tc2.setCellStyle(s.bold());
         int grandTotal = 0;
         for (int d = 1; d <= days; d++) {
             Cell c = totalRow.createCell(d);
             c.setCellValue(dayTotals[d]);
-            c.setCellStyle(num);
+            c.setCellStyle(s.num());
             grandTotal += dayTotals[d];
         }
         Cell gt = totalRow.createCell(days + 1);
         gt.setCellValue(grandTotal);
-        gt.setCellStyle(bold);
+        gt.setCellStyle(s.bold());
 
-        sheet.setColumnWidth(0, 6000);
-        for (int d = 1; d <= days; d++) sheet.setColumnWidth(d, 1200);
-        sheet.setColumnWidth(days + 1, 2000);
-        sheet.setColumnWidth(days + 2, 2000);
+        return rowIdx;
     }
 
-    // ── Livestock ──────────────────────────────────────────────────────────────
-
-    private void buildLivestockSheet(XSSFWorkbook wb, ReportDto report,
-            CellStyle hdr, CellStyle title, CellStyle num, CellStyle bold) {
-        Sheet sheet = wb.createSheet("Livestock Returns");
+    private int buildLivestockSection(Sheet sheet, ReportDto report, int startRow, Styles s) {
         List<LivestockRecordDto> records = report.livestock() != null ? report.livestock() : List.of();
 
-        Row titleRow = sheet.createRow(0);
+        Row titleRow = sheet.createRow(startRow);
         Cell tc = titleRow.createCell(0);
         tc.setCellValue("Livestock Returns – " + MONTH_NAMES[report.month()] + " " + report.year());
-        tc.setCellStyle(title);
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 2));
+        tc.setCellStyle(s.title());
+        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, 2));
 
-        Row headerRow = sheet.createRow(1);
-        createHdrCell(headerRow, 0, "Category", hdr);
-        createHdrCell(headerRow, 1, "Type", hdr);
-        createHdrCell(headerRow, 2, "Count", hdr);
+        Row headerRow = sheet.createRow(startRow + 1);
+        createHdrCell(headerRow, 0, "Category", s.header());
+        createHdrCell(headerRow, 1, "Type", s.header());
+        createHdrCell(headerRow, 2, "Count", s.header());
 
         Map<String, List<LivestockRecordDto>> byCategory = records.stream()
             .collect(Collectors.groupingBy(LivestockRecordDto::category, LinkedHashMap::new, Collectors.toList()));
 
-        int rowIdx = 2;
+        int rowIdx = startRow + 2;
         int grandTotal = 0;
         for (Map.Entry<String, List<LivestockRecordDto>> e : byCategory.entrySet()) {
             int catTotal = 0;
@@ -149,55 +198,49 @@ public class ExportService {
                 row.createCell(1).setCellValue(lr.type());
                 Cell cc = row.createCell(2);
                 cc.setCellValue(lr.count());
-                cc.setCellStyle(num);
+                cc.setCellStyle(s.num());
                 catTotal += lr.count();
             }
             Row subRow = sheet.createRow(rowIdx++);
             Cell sc = subRow.createCell(1);
             sc.setCellValue(toTitle(e.getKey()) + " Total");
-            sc.setCellStyle(bold);
+            sc.setCellStyle(s.bold());
             Cell sv = subRow.createCell(2);
             sv.setCellValue(catTotal);
-            sv.setCellStyle(bold);
+            sv.setCellStyle(s.bold());
             grandTotal += catTotal;
         }
 
-        Row grandRow = sheet.createRow(rowIdx);
+        Row grandRow = sheet.createRow(rowIdx++);
         Cell gc = grandRow.createCell(1);
         gc.setCellValue("GRAND TOTAL");
-        gc.setCellStyle(bold);
+        gc.setCellStyle(s.bold());
         Cell gv = grandRow.createCell(2);
         gv.setCellValue(grandTotal);
-        gv.setCellStyle(bold);
+        gv.setCellStyle(s.bold());
 
-        sheet.setColumnWidth(0, 4000);
-        sheet.setColumnWidth(1, 5000);
-        sheet.setColumnWidth(2, 3000);
+        return rowIdx;
     }
 
-    // ── Milk ───────────────────────────────────────────────────────────────────
-
-    private void buildMilkSheet(XSSFWorkbook wb, ReportDto report,
-            CellStyle hdr, CellStyle title, CellStyle num, CellStyle bold) {
-        Sheet sheet = wb.createSheet("Milk Production");
+    private int buildMilkSection(Sheet sheet, ReportDto report, int startRow, Styles s) {
         List<MilkRecordDto> records = report.milk() != null
             ? report.milk().stream().sorted(Comparator.comparingInt(MilkRecordDto::dayOfMonth)).toList()
             : List.of();
 
-        Row titleRow = sheet.createRow(0);
+        Row titleRow = sheet.createRow(startRow);
         Cell tc = titleRow.createCell(0);
         tc.setCellValue("Milk Production – " + MONTH_NAMES[report.month()] + " " + report.year());
-        tc.setCellStyle(title);
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 3));
+        tc.setCellStyle(s.title());
+        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, 3));
 
-        Row headerRow = sheet.createRow(1);
-        createHdrCell(headerRow, 0, "Day",           hdr);
-        createHdrCell(headerRow, 1, "Date",          hdr);
-        createHdrCell(headerRow, 2, "Litres",        hdr);
-        createHdrCell(headerRow, 3, "Running Total", hdr);
+        Row headerRow = sheet.createRow(startRow + 1);
+        createHdrCell(headerRow, 0, "Day", s.header());
+        createHdrCell(headerRow, 1, "Date", s.header());
+        createHdrCell(headerRow, 2, "Litres", s.header());
+        createHdrCell(headerRow, 3, "Running Total", s.header());
 
         double running = 0;
-        int rowIdx = 2;
+        int rowIdx = startRow + 2;
         for (MilkRecordDto m : records) {
             Row row = sheet.createRow(rowIdx++);
             row.createCell(0).setCellValue(m.dayOfMonth());
@@ -206,60 +249,53 @@ public class ExportService {
             double litres = m.litres() != null ? m.litres().doubleValue() : 0;
             Cell lc = row.createCell(2);
             lc.setCellValue(litres);
-            lc.setCellStyle(num);
+            lc.setCellStyle(s.num());
             running += litres;
             Cell rc = row.createCell(3);
             rc.setCellValue(running);
-            rc.setCellStyle(num);
+            rc.setCellStyle(s.num());
         }
 
-        rowIdx++; // blank row
+        rowIdx++;
         Row totalRow = sheet.createRow(rowIdx++);
         Cell tl = totalRow.createCell(2);
         tl.setCellValue("Total Litres");
-        tl.setCellStyle(bold);
+        tl.setCellStyle(s.bold());
         Cell tv = totalRow.createCell(3);
         tv.setCellValue(running);
-        tv.setCellStyle(bold);
+        tv.setCellStyle(s.bold());
 
-        Row valueRow = sheet.createRow(rowIdx);
+        Row valueRow = sheet.createRow(rowIdx++);
         Cell vl = valueRow.createCell(2);
         vl.setCellValue("Value (×40)");
-        vl.setCellStyle(bold);
+        vl.setCellStyle(s.bold());
         Cell vv = valueRow.createCell(3);
         vv.setCellValue(running * 40);
-        vv.setCellStyle(bold);
+        vv.setCellStyle(s.bold());
 
-        sheet.setColumnWidth(0, 2000);
-        sheet.setColumnWidth(1, 3500);
-        sheet.setColumnWidth(2, 3500);
-        sheet.setColumnWidth(3, 3500);
+        return rowIdx;
     }
 
-    // ── Expenses ───────────────────────────────────────────────────────────────
-
-    private void buildExpensesSheet(XSSFWorkbook wb, ReportDto report,
-            CellStyle hdr, CellStyle title, CellStyle num, CellStyle bold) {
-        Sheet sheet = wb.createSheet("Expenses");
+    private int buildExpensesSection(Sheet sheet, ReportDto report, int startRow, Styles s) {
         List<ExpenseRecordDto> records = report.expenses() != null
             ? report.expenses().stream().sorted(Comparator.comparingInt(ExpenseRecordDto::entryNo)).toList()
             : List.of();
 
-        Row titleRow = sheet.createRow(0);
+        Row titleRow = sheet.createRow(startRow);
         Cell tc = titleRow.createCell(0);
         tc.setCellValue("Expenses – " + MONTH_NAMES[report.month()] + " " + report.year());
-        tc.setCellStyle(title);
-        sheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 4));
+        tc.setCellStyle(s.title());
+        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, 4));
 
-        Row headerRow = sheet.createRow(1);
-        createHdrCell(headerRow, 0, "No.",                   hdr);
-        createHdrCell(headerRow, 1, "Date",                  hdr);
-        createHdrCell(headerRow, 2, "Supplier / Contractor", hdr);
-        createHdrCell(headerRow, 3, "Ref No",                hdr);
-        createHdrCell(headerRow, 4, "Cost",                  hdr);
+        Row headerRow = sheet.createRow(startRow + 1);
+        createHdrCell(headerRow, 0, "No.", s.header());
+        createHdrCell(headerRow, 1, "Date", s.header());
+        createHdrCell(headerRow, 2, "Supplier / Contractor", s.header());
+        createHdrCell(headerRow, 3, "Ref No", s.header());
+        createHdrCell(headerRow, 4, "Cost", s.header());
 
         double total = 0;
-        int rowIdx = 2;
+        int rowIdx = startRow + 2;
         for (ExpenseRecordDto e : records) {
             Row row = sheet.createRow(rowIdx++);
             row.createCell(0).setCellValue(e.entryNo());
@@ -269,26 +305,33 @@ public class ExportService {
             double cost = e.cost() != null ? e.cost().doubleValue() : 0;
             Cell cc = row.createCell(4);
             cc.setCellValue(cost);
-            cc.setCellStyle(num);
+            cc.setCellStyle(s.num());
             total += cost;
         }
 
-        Row totalRow = sheet.createRow(rowIdx);
-        Cell tl = totalRow.createCell(3);
-        tl.setCellValue("TOTAL");
-        tl.setCellStyle(bold);
-        Cell tv = totalRow.createCell(4);
-        tv.setCellValue(total);
-        tv.setCellStyle(bold);
+        Row totalRow = sheet.createRow(rowIdx++);
+        Cell tl2 = totalRow.createCell(3);
+        tl2.setCellValue("TOTAL");
+        tl2.setCellStyle(s.bold());
+        Cell tv2 = totalRow.createCell(4);
+        tv2.setCellValue(total);
+        tv2.setCellStyle(s.bold());
 
-        sheet.setColumnWidth(0, 2000);
-        sheet.setColumnWidth(1, 3500);
-        sheet.setColumnWidth(2, 8000);
-        sheet.setColumnWidth(3, 4000);
-        sheet.setColumnWidth(4, 3500);
+        return rowIdx;
     }
 
     // ── Style helpers ──────────────────────────────────────────────────────────
+
+    private Styles createStyles(XSSFWorkbook wb) {
+        return new Styles(createHeaderStyle(wb), createTitleStyle(wb), createNumStyle(wb), createBoldStyle(wb));
+    }
+
+    private void setAttendanceColumnWidths(Sheet sheet, int days) {
+        sheet.setColumnWidth(0, 6000);
+        for (int d = 1; d <= days; d++) sheet.setColumnWidth(d, 1200);
+        sheet.setColumnWidth(days + 1, 2000);
+        sheet.setColumnWidth(days + 2, 2000);
+    }
 
     private CellStyle createHeaderStyle(XSSFWorkbook wb) {
         XSSFCellStyle s = wb.createCellStyle();
