@@ -16,8 +16,8 @@ public class User extends AuditBase {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "farm_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "farm_id", nullable = true)
     private Farm farm;
 
     @Column(nullable = false)

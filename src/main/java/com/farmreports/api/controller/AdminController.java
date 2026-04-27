@@ -40,7 +40,7 @@ public class AdminController {
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer month,
             Authentication auth) {
-        requireAdmin(auth);
+        requireExpenseRole(auth);
         int y = year  != null ? year  : java.time.LocalDate.now().getYear();
         int m = month != null ? month : java.time.LocalDate.now().getMonthValue();
         return ApiResponse.ok(adminService.getFarmLiveStatus(y, m));
@@ -75,7 +75,7 @@ public class AdminController {
             @RequestParam Integer year,
             @RequestParam Integer month,
             Authentication auth) {
-        requireAdmin(auth);
+        requireExpenseRole(auth);
         return ApiResponse.ok(reportService.getReport(farmId, year, month));
     }
 
@@ -86,7 +86,7 @@ public class AdminController {
             @RequestParam Integer year,
             @RequestParam Integer month,
             Authentication auth) {
-        requireAdmin(auth);
+        requireExpenseRole(auth);
         return ApiResponse.ok(reportService.createOrGetReport(farmId, year, month, ClaimsHelper.getUserId(auth)));
     }
 
@@ -94,7 +94,7 @@ public class AdminController {
     public ApiResponse<ReportDto> getAdminReport(
             @PathVariable Integer id,
             Authentication auth) {
-        requireAdmin(auth);
+        requireExpenseRole(auth);
         return ApiResponse.ok(reportService.getReportById(id, null, "ADMIN"));
     }
 
@@ -139,7 +139,7 @@ public class AdminController {
             @RequestParam Integer farmId,
             @Valid @RequestBody List<@Valid ExpenseEntryRequest> entries,
             Authentication auth) {
-        requireAdmin(auth);
+        requireExpenseRole(auth);
         reportService.upsertExpenses(id, farmId, entries);
         return ApiResponse.ok();
     }
@@ -214,9 +214,17 @@ public class AdminController {
 
     private void requireDashboardRole(Authentication auth) {
         String role = ClaimsHelper.getRole(auth);
-        if (!"ADMIN".equals(role) && !"MANAGER".equals(role)) {
+        if (!"ADMIN".equals(role) && !"MANAGER".equals(role) && !"OPERATIONS_MANAGER".equals(role)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "Dashboard access requires ADMIN or MANAGER role");
+                "Dashboard access requires ADMIN, MANAGER, or OPERATIONS_MANAGER role");
+        }
+    }
+
+    private void requireExpenseRole(Authentication auth) {
+        String role = ClaimsHelper.getRole(auth);
+        if (!"ADMIN".equals(role) && !"OPERATIONS_MANAGER".equals(role)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "Admin or Operations Manager access required");
         }
     }
 

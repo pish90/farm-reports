@@ -19,6 +19,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -39,18 +40,19 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
         }
 
-        Map<String, Object> claims = Map.of(
-                "userId", user.getId(),
-                "farmId", user.getFarm().getId(),
-                "farmName", user.getFarm().getName(),
-                "userName", user.getName(),
-                "role", user.getRole().name()
-        );
+        Integer farmId   = user.getFarm() != null ? user.getFarm().getId()   : null;
+        String  farmName = user.getFarm() != null ? user.getFarm().getName() : null;
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("userId",   user.getId());
+        claims.put("userName", user.getName());
+        claims.put("role",     user.getRole().name());
+        if (farmId   != null) claims.put("farmId",   farmId);
+        if (farmName != null) claims.put("farmName", farmName);
 
         String token = jwtService.generateToken(user.getEmail(), claims);
 
-        return new AuthResponse(token, user.getId(), user.getFarm().getId(),
-                user.getFarm().getName(), user.getName());
+        return new AuthResponse(token, user.getId(), farmId, farmName, user.getName());
     }
 
     @Transactional
@@ -80,11 +82,13 @@ public class AuthController {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated");
         }
 
-        Claims claims = (Claims) authentication.getPrincipal();
+        Claims claims  = (Claims) authentication.getPrincipal();
+        Object farmObj = claims.get("farmId");
+        Integer farmId = farmObj != null ? ((Number) farmObj).intValue() : null;
         return new AuthResponse(
                 null,
                 ((Number) claims.get("userId")).intValue(),
-                ((Number) claims.get("farmId")).intValue(),
+                farmId,
                 claims.get("farmName", String.class),
                 claims.get("userName", String.class)
         );

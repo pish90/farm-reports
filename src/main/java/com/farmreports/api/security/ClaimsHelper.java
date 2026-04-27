@@ -9,7 +9,8 @@ public final class ClaimsHelper {
 
     public static Integer getFarmId(Authentication auth) {
         Claims claims = (Claims) auth.getPrincipal();
-        return ((Number) claims.get("farmId")).intValue();
+        Object val = claims.get("farmId");
+        return val != null ? ((Number) val).intValue() : null;
     }
 
     public static Integer getUserId(Authentication auth) {
