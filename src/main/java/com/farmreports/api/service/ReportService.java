@@ -63,7 +63,9 @@ public class ReportService {
             a.setReport(report);
             a.setWorker(worker);
             a.setDayOfMonth(e.dayOfMonth());
-            a.setPresent(e.present());
+            String status = e.status() != null ? e.status() : (Boolean.TRUE.equals(e.present()) ? "P" : "A");
+            a.setStatus(status);
+            a.setPresent("P".equals(status));
             a.setNotes(e.notes());
             return a;
         }).toList();
@@ -242,6 +244,7 @@ public class ReportService {
                         a.getWorker().getName(),
                         a.getDayOfMonth(),
                         a.isPresent(),
+                        a.getStatus() != null ? a.getStatus() : (a.isPresent() ? "P" : "A"),
                         a.getNotes()))
                 .toList();
 

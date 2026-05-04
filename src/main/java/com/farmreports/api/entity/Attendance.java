@@ -30,6 +30,9 @@ public class Attendance {
     @Column(nullable = false)
     private boolean present;
 
+    @Column(length = 3)
+    private String status;
+
     @Column(length = 500)
     private String notes;
 }

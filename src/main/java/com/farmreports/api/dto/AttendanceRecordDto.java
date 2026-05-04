@@ -6,5 +6,6 @@ public record AttendanceRecordDto(
         String workerName,
         Integer dayOfMonth,
         boolean present,
+        String status,
         String notes
 ) {}

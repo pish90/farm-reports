@@ -8,5 +8,6 @@ public record AttendanceEntryRequest(
         @NotNull Integer workerId,
         @NotNull @Min(1) @Max(31) Integer dayOfMonth,
         @NotNull Boolean present,
+        String status,
         String notes
 ) {}

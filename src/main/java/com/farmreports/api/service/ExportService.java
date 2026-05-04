@@ -26,7 +26,7 @@ public class ExportService {
 
     public record FarmReport(String farmName, ReportDto report) {}
 
-    private record Styles(CellStyle header, CellStyle title, CellStyle num, CellStyle bold) {}
+    private record Styles(CellStyle header, CellStyle title, CellStyle num, CellStyle bold, CellStyle center) {}
 
     // ── Single-farm export ─────────────────────────────────────────────────────
 
@@ -96,8 +96,7 @@ public class ExportService {
                 sheet.setColumnWidth(0, 6000);
                 for (int d = 1; d <= Math.min(4, days); d++) sheet.setColumnWidth(d, 3000);
                 for (int d = 5; d <= days; d++) sheet.setColumnWidth(d, 1200);
-                sheet.setColumnWidth(days + 1, 2000);
-                sheet.setColumnWidth(days + 2, 2000);
+                for (int i = 1; i <= 6; i++) sheet.setColumnWidth(days + i, 2000);
             }
 
             wb.write(out);
@@ -117,58 +116,73 @@ public class ExportService {
         Cell tc = titleRow.createCell(0);
         tc.setCellValue("Attendance – " + MONTH_NAMES[report.month()] + " " + report.year());
         tc.setCellStyle(s.title());
-        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, days + 2));
+        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, days + 6));
 
         Row headerRow = sheet.createRow(startRow + 1);
         createHdrCell(headerRow, 0, "Worker", s.header());
         for (int d = 1; d <= days; d++) createHdrCell(headerRow, d, String.valueOf(d), s.header());
         createHdrCell(headerRow, days + 1, "Present", s.header());
-        createHdrCell(headerRow, days + 2, "Days", s.header());
+        createHdrCell(headerRow, days + 2, "Absent",  s.header());
+        createHdrCell(headerRow, days + 3, "Annual",  s.header());
+        createHdrCell(headerRow, days + 4, "Sick",    s.header());
+        createHdrCell(headerRow, days + 5, "Parent",  s.header());
+        createHdrCell(headerRow, days + 6, "Days",    s.header());
 
-        Map<String, Map<Integer, Boolean>> grid = new LinkedHashMap<>();
+        Map<String, Map<Integer, String>> grid = new LinkedHashMap<>();
         for (AttendanceRecordDto r : records) {
-            grid.computeIfAbsent(r.workerName(), k -> new HashMap<>()).put(r.dayOfMonth(), r.present());
+            String status = r.status() != null ? r.status() : (r.present() ? "P" : "A");
+            grid.computeIfAbsent(r.workerName(), k -> new HashMap<>()).put(r.dayOfMonth(), status);
         }
 
         int rowIdx = startRow + 2;
-        int[] dayTotals = new int[days + 1];
-        for (Map.Entry<String, Map<Integer, Boolean>> e : grid.entrySet()) {
+        int[] dayPresent = new int[days + 1];
+        for (Map.Entry<String, Map<Integer, String>> e : grid.entrySet()) {
             Row row = sheet.createRow(rowIdx++);
             row.createCell(0).setCellValue(e.getKey());
-            int presentCount = 0;
+            int cntP = 0, cntA = 0, cntAL = 0, cntSL = 0, cntPL = 0;
             for (int d = 1; d <= days; d++) {
-                Boolean present = e.getValue().get(d);
+                String status = e.getValue().getOrDefault(d, "A");
                 Cell c = row.createCell(d);
-                if (Boolean.TRUE.equals(present)) {
-                    c.setCellValue("✓");
-                    presentCount++;
-                    dayTotals[d]++;
+                c.setCellValue(status);
+                c.setCellStyle(s.center());
+                switch (status) {
+                    case "P"  -> { cntP++;  dayPresent[d]++; }
+                    case "A"  -> cntA++;
+                    case "AL" -> cntAL++;
+                    case "SL" -> cntSL++;
+                    case "PL" -> cntPL++;
                 }
             }
-            Cell pc = row.createCell(days + 1);
-            pc.setCellValue(presentCount);
-            pc.setCellStyle(s.num());
-            Cell dc = row.createCell(days + 2);
-            dc.setCellValue(days);
-            dc.setCellStyle(s.num());
+            numCell(row, days + 1, cntP,  s);
+            numCell(row, days + 2, cntA,  s);
+            numCell(row, days + 3, cntAL, s);
+            numCell(row, days + 4, cntSL, s);
+            numCell(row, days + 5, cntPL, s);
+            numCell(row, days + 6, days,  s);
         }
 
         Row totalRow = sheet.createRow(rowIdx++);
         Cell tc2 = totalRow.createCell(0);
         tc2.setCellValue("TOTAL");
         tc2.setCellStyle(s.bold());
-        int grandTotal = 0;
+        int grandPresent = 0;
         for (int d = 1; d <= days; d++) {
             Cell c = totalRow.createCell(d);
-            c.setCellValue(dayTotals[d]);
+            c.setCellValue(dayPresent[d]);
             c.setCellStyle(s.num());
-            grandTotal += dayTotals[d];
+            grandPresent += dayPresent[d];
         }
         Cell gt = totalRow.createCell(days + 1);
-        gt.setCellValue(grandTotal);
+        gt.setCellValue(grandPresent);
         gt.setCellStyle(s.bold());
 
         return rowIdx;
+    }
+
+    private void numCell(Row row, int col, int value, Styles s) {
+        Cell c = row.createCell(col);
+        c.setCellValue(value);
+        c.setCellStyle(s.num());
     }
 
     private int buildLivestockSection(Sheet sheet, ReportDto report, int startRow, Styles s) {
@@ -323,14 +337,13 @@ public class ExportService {
     // ── Style helpers ──────────────────────────────────────────────────────────
 
     private Styles createStyles(XSSFWorkbook wb) {
-        return new Styles(createHeaderStyle(wb), createTitleStyle(wb), createNumStyle(wb), createBoldStyle(wb));
+        return new Styles(createHeaderStyle(wb), createTitleStyle(wb), createNumStyle(wb), createBoldStyle(wb), createCenterStyle(wb));
     }
 
     private void setAttendanceColumnWidths(Sheet sheet, int days) {
         sheet.setColumnWidth(0, 6000);
         for (int d = 1; d <= days; d++) sheet.setColumnWidth(d, 1200);
-        sheet.setColumnWidth(days + 1, 2000);
-        sheet.setColumnWidth(days + 2, 2000);
+        for (int i = 1; i <= 6; i++) sheet.setColumnWidth(days + i, 2000);
     }
 
     private CellStyle createHeaderStyle(XSSFWorkbook wb) {
@@ -361,6 +374,12 @@ public class ExportService {
         s.setDataFormat(wb.createDataFormat().getFormat("0.00"));
         s.setAlignment(HorizontalAlignment.RIGHT);
         setBorder(s);
+        return s;
+    }
+
+    private CellStyle createCenterStyle(XSSFWorkbook wb) {
+        CellStyle s = wb.createCellStyle();
+        s.setAlignment(HorizontalAlignment.CENTER);
         return s;
     }
 
