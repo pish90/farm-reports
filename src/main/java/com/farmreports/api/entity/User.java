@@ -32,4 +32,7 @@ public class User extends AuditBase {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
     private UserRole role;
+
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword = true;
 }

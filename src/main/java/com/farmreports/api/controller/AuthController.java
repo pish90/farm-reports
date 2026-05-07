@@ -1,6 +1,5 @@
 package com.farmreports.api.controller;
 
-import com.farmreports.api.dto.ApiResponse;
 import com.farmreports.api.dto.AuthResponse;
 import com.farmreports.api.dto.ChangePasswordRequest;
 import com.farmreports.api.dto.LoginRequest;
@@ -44,20 +43,21 @@ public class AuthController {
         String  farmName = user.getFarm() != null ? user.getFarm().getName() : null;
 
         Map<String, Object> claims = new HashMap<>();
-        claims.put("userId",   user.getId());
-        claims.put("userName", user.getName());
-        claims.put("role",     user.getRole().name());
+        claims.put("userId",            user.getId());
+        claims.put("userName",          user.getName());
+        claims.put("role",              user.getRole().name());
+        claims.put("mustChangePassword", user.isMustChangePassword());
         if (farmId   != null) claims.put("farmId",   farmId);
         if (farmName != null) claims.put("farmName", farmName);
 
         String token = jwtService.generateToken(user.getEmail(), claims);
 
-        return new AuthResponse(token, user.getId(), farmId, farmName, user.getName());
+        return new AuthResponse(token, user.getId(), farmId, farmName, user.getName(), user.isMustChangePassword());
     }
 
     @Transactional
     @PutMapping("/password")
-    public ApiResponse<Void> changePassword(
+    public AuthResponse changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
             Authentication authentication) {
 
@@ -72,8 +72,22 @@ public class AuthController {
         }
 
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.setMustChangePassword(false);
         userRepository.save(user);
-        return ApiResponse.ok(null);
+
+        Integer farmId   = user.getFarm() != null ? user.getFarm().getId()   : null;
+        String  farmName = user.getFarm() != null ? user.getFarm().getName() : null;
+
+        Map<String, Object> newClaims = new HashMap<>();
+        newClaims.put("userId",             user.getId());
+        newClaims.put("userName",           user.getName());
+        newClaims.put("role",               user.getRole().name());
+        newClaims.put("mustChangePassword", false);
+        if (farmId   != null) newClaims.put("farmId",   farmId);
+        if (farmName != null) newClaims.put("farmName", farmName);
+
+        String newToken = jwtService.generateToken(email, newClaims);
+        return new AuthResponse(newToken, user.getId(), farmId, farmName, user.getName(), false);
     }
 
     @GetMapping("/me")
@@ -85,12 +99,14 @@ public class AuthController {
         Claims claims  = (Claims) authentication.getPrincipal();
         Object farmObj = claims.get("farmId");
         Integer farmId = farmObj != null ? ((Number) farmObj).intValue() : null;
+        Boolean mustChange = claims.get("mustChangePassword", Boolean.class);
         return new AuthResponse(
                 null,
                 ((Number) claims.get("userId")).intValue(),
                 farmId,
                 claims.get("farmName", String.class),
-                claims.get("userName", String.class)
+                claims.get("userName", String.class),
+                mustChange
         );
     }
 }

@@ -8,5 +8,6 @@ public record AuthResponse(
         Integer userId,
         Integer farmId,
         String farmName,
-        String userName
+        String userName,
+        Boolean mustChangePassword
 ) {}
