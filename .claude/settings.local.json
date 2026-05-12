@@ -45,7 +45,26 @@
       "Bash(node_modules/.bin/tsc --version)",
       "Bash(node_modules/.bin/tsc --noEmit --strict)",
       "Bash(node_modules/.bin/tsc --noEmit --strict --jsx react-native --target es2017 --lib es2017 --moduleResolution bundler --allowSyntheticDefaultImports true src/screens/AdminFarmDetailScreen.tsx src/services/adminService.ts src/screens/AdminDashboardScreen.tsx src/navigation/MainNavigator.tsx)",
-      "Bash(node_modules/.bin/tsc --noEmit --strict --jsx react-native --target es2017 --lib es2017 --moduleResolution bundler --allowSyntheticDefaultImports true --skipLibCheck src/screens/AdminFarmDetailScreen.tsx src/services/adminService.ts src/screens/AdminDashboardScreen.tsx src/navigation/MainNavigator.tsx src/types/index.ts)"
+      "Bash(node_modules/.bin/tsc --noEmit --strict --jsx react-native --target es2017 --lib es2017 --moduleResolution bundler --allowSyntheticDefaultImports true --skipLibCheck src/screens/AdminFarmDetailScreen.tsx src/services/adminService.ts src/screens/AdminDashboardScreen.tsx src/navigation/MainNavigator.tsx src/types/index.ts)",
+      "Bash(git restore *)",
+      "Bash(powershell *)",
+      "Bash(git pull *)",
+      "Bash(git stash *)",
+      "Bash(gh repo *)",
+      "Bash(where gh *)",
+      "PowerShell(gh repo *)",
+      "Bash(git branch *)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(u[:120]\\) for u in d.get\\('logFiles',[]\\)]\")",
+      "Bash(python *)",
+      "Bash(xargs cat *)",
+      "Bash(node -e \"const bcrypt = require\\('bcryptjs'\\); bcrypt.hash\\('changeme123', 10\\).then\\(h => console.log\\(h\\)\\);\")",
+      "Bash(node -e \"const bcrypt = require\\('bcrypt'\\); bcrypt.hash\\('changeme123', 10\\).then\\(h => console.log\\(h\\)\\);\")",
+      "Bash(node *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\development\\\\workspace2\\\\farm-reports\\\\mobile\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)",
+      "Bash(Sort-Object FullName)",
+      "Bash(Get-Content *)",
+      "Bash(git rm *)"
     ]
   }
 }
