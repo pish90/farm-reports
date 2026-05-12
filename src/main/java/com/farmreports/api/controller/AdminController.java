@@ -63,7 +63,7 @@ public class AdminController {
             @RequestParam(required = false) String status,
             Authentication auth) {
         requireDashboardRole(auth);
-        Integer effectiveFarmId = isAdmin(auth) ? farmId : ClaimsHelper.getFarmId(auth);
+        Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? farmId : ClaimsHelper.getFarmId(auth);
         return ApiResponse.ok(adminService.listReports(effectiveFarmId, year, month, status));
     }
 
@@ -86,7 +86,7 @@ public class AdminController {
             @RequestParam Integer year,
             @RequestParam Integer month,
             Authentication auth) {
-        requireExpenseRole(auth);
+        requireAdmin(auth);
         return ApiResponse.ok(reportService.createOrGetReport(farmId, year, month, ClaimsHelper.getUserId(auth)));
     }
 
@@ -139,7 +139,7 @@ public class AdminController {
             @RequestParam Integer farmId,
             @Valid @RequestBody List<@Valid ExpenseEntryRequest> entries,
             Authentication auth) {
-        requireExpenseRole(auth);
+        requireAdmin(auth);
         reportService.upsertExpenses(id, farmId, entries);
         return ApiResponse.ok();
     }
@@ -236,5 +236,9 @@ public class AdminController {
 
     private boolean isAdmin(Authentication auth) {
         return "ADMIN".equals(ClaimsHelper.getRole(auth));
+    }
+
+    private boolean isOpsManager(Authentication auth) {
+        return "OPERATIONS_MANAGER".equals(ClaimsHelper.getRole(auth));
     }
 }
