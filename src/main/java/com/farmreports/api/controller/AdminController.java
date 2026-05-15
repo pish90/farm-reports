@@ -139,7 +139,7 @@ public class AdminController {
             @RequestParam Integer farmId,
             @Valid @RequestBody List<@Valid ExpenseEntryRequest> entries,
             Authentication auth) {
-        requireAdmin(auth);
+        requireExpenseRole(auth);
         reportService.upsertExpenses(id, farmId, entries);
         return ApiResponse.ok();
     }
