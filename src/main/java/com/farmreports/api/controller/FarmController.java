@@ -57,6 +57,7 @@ public class FarmController {
     }
 
     private void checkFarmAccess(Integer farmId, Authentication auth) {
+        if ("ADMIN".equals(ClaimsHelper.getRole(auth))) return;
         if (!farmId.equals(ClaimsHelper.getFarmId(auth))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
         }
