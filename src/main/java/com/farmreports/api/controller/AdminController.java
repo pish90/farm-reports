@@ -40,7 +40,7 @@ public class AdminController {
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer month,
             Authentication auth) {
-        requireExpenseRole(auth);
+        requireDashboardRole(auth);
         int y = year  != null ? year  : java.time.LocalDate.now().getYear();
         int m = month != null ? month : java.time.LocalDate.now().getMonthValue();
         return ApiResponse.ok(adminService.getFarmLiveStatus(y, m));
@@ -75,7 +75,7 @@ public class AdminController {
             @RequestParam Integer year,
             @RequestParam Integer month,
             Authentication auth) {
-        requireExpenseRole(auth);
+        requireDashboardRole(auth);
         return ApiResponse.ok(reportService.getReport(farmId, year, month));
     }
 
@@ -86,7 +86,7 @@ public class AdminController {
             @RequestParam Integer year,
             @RequestParam Integer month,
             Authentication auth) {
-        requireAdmin(auth);
+        requireDashboardRole(auth);
         return ApiResponse.ok(reportService.createOrGetReport(farmId, year, month, ClaimsHelper.getUserId(auth)));
     }
 
@@ -94,7 +94,7 @@ public class AdminController {
     public ApiResponse<ReportDto> getAdminReport(
             @PathVariable Integer id,
             Authentication auth) {
-        requireExpenseRole(auth);
+        requireDashboardRole(auth);
         return ApiResponse.ok(reportService.getReportById(id, null, "ADMIN"));
     }
 
@@ -171,7 +171,7 @@ public class AdminController {
             @PathVariable Integer id,
             @RequestParam Integer farmId,
             Authentication auth) {
-        requireAdmin(auth);
+        requireDashboardRole(auth);
         return ApiResponse.ok(reportService.submitReport(id, farmId));
     }
 
