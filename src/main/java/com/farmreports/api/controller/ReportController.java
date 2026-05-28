@@ -2,7 +2,9 @@ package com.farmreports.api.controller;
 
 import com.farmreports.api.dto.*;
 import com.farmreports.api.dto.NoteRequest;
+import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.security.ClaimsHelper;
+import com.farmreports.api.service.AuditService;
 import com.farmreports.api.service.ExportService;
 import com.farmreports.api.service.ReportService;
 import jakarta.validation.Valid;
@@ -24,6 +26,7 @@ public class ReportController {
 
     private final ReportService reportService;
     private final ExportService exportService;
+    private final AuditService auditService;
 
     @GetMapping
     public ApiResponse<ReportDto> getReport(
@@ -40,9 +43,14 @@ public class ReportController {
     public ApiResponse<ReportDto> createReport(
             @Valid @RequestBody CreateReportRequest request, Authentication auth) {
         checkFarmAccess(request.farmId(), auth);
-        return ApiResponse.ok(reportService.createOrGetReport(
+        ReportDto report = reportService.createOrGetReport(
                 request.farmId(), request.year(), request.month(),
-                ClaimsHelper.getUserId(auth)));
+                ClaimsHelper.getUserId(auth));
+        auditService.log(AuditAction.REPORT_CREATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(report.id()),
+                "Report created for " + request.year() + "-" + String.format("%02d", request.month()));
+        return ApiResponse.ok(report);
     }
 
     @PutMapping("/{id}/attendance")
@@ -51,6 +59,10 @@ public class ReportController {
             @Valid @RequestBody List<@Valid AttendanceEntryRequest> entries,
             Authentication auth) {
         reportService.upsertAttendance(id, ClaimsHelper.getFarmId(auth), entries);
+        auditService.log(AuditAction.ATTENDANCE_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id),
+                "Attendance updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -60,6 +72,10 @@ public class ReportController {
             @Valid @RequestBody List<@Valid LivestockEntryRequest> entries,
             Authentication auth) {
         reportService.upsertLivestock(id, ClaimsHelper.getFarmId(auth), entries);
+        auditService.log(AuditAction.LIVESTOCK_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id),
+                "Livestock returns updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -69,6 +85,10 @@ public class ReportController {
             @Valid @RequestBody List<@Valid MilkEntryRequest> entries,
             Authentication auth) {
         reportService.upsertMilk(id, ClaimsHelper.getFarmId(auth), entries);
+        auditService.log(AuditAction.MILK_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id),
+                "Milk production updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -78,6 +98,10 @@ public class ReportController {
             @Valid @RequestBody List<@Valid ExpenseEntryRequest> entries,
             Authentication auth) {
         reportService.upsertExpenses(id, ClaimsHelper.getFarmId(auth), entries);
+        auditService.log(AuditAction.EXPENSES_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id),
+                "Expenses updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -87,6 +111,9 @@ public class ReportController {
             @Valid @RequestBody NoteRequest request,
             Authentication auth) {
         reportService.upsertAttendanceNotes(id, ClaimsHelper.getFarmId(auth), request);
+        auditService.log(AuditAction.ATTENDANCE_NOTES_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id), "Attendance notes updated");
         return ApiResponse.ok();
     }
 
@@ -96,12 +123,19 @@ public class ReportController {
             @Valid @RequestBody NoteRequest request,
             Authentication auth) {
         reportService.upsertLivestockNotes(id, ClaimsHelper.getFarmId(auth), request);
+        auditService.log(AuditAction.LIVESTOCK_NOTES_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id), "Livestock notes updated");
         return ApiResponse.ok();
     }
 
     @PostMapping("/{id}/submit")
     public ApiResponse<ReportDto> submitReport(@PathVariable Integer id, Authentication auth) {
-        return ApiResponse.ok(reportService.submitReport(id, ClaimsHelper.getFarmId(auth)));
+        ReportDto report = reportService.submitReport(id, ClaimsHelper.getFarmId(auth));
+        auditService.log(AuditAction.REPORT_SUBMITTED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id), "Report submitted");
+        return ApiResponse.ok(report);
     }
 
     @PostMapping("/{id}/reopen")
@@ -109,7 +143,10 @@ public class ReportController {
         if (!"ADMIN".equals(ClaimsHelper.getRole(auth))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Only admins can reopen reports");
         }
-        return ApiResponse.ok(reportService.adminReopenReport(id));
+        ReportDto report = reportService.adminReopenReport(id);
+        auditService.log(AuditAction.REPORT_REOPENED, auth,
+                null, null, "MonthlyReport", String.valueOf(id), "Report reopened");
+        return ApiResponse.ok(report);
     }
 
     @GetMapping("/{id}")

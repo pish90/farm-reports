@@ -23,4 +23,14 @@ public final class ClaimsHelper {
         Object role = claims.get("role");
         return role != null ? (String) role : "WORKER";
     }
+
+    public static String getUserName(Authentication auth) {
+        Claims claims = (Claims) auth.getPrincipal();
+        return claims.get("userName", String.class);
+    }
+
+    public static String getFarmName(Authentication auth) {
+        Claims claims = (Claims) auth.getPrincipal();
+        return claims.get("farmName", String.class);
+    }
 }

@@ -2,12 +2,15 @@ package com.farmreports.api.controller;
 
 import com.farmreports.api.dto.*;
 import com.farmreports.api.dto.NoteRequest;
+import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.security.ClaimsHelper;
 import com.farmreports.api.service.AdminService;
+import com.farmreports.api.service.AuditService;
 import com.farmreports.api.service.ExportService;
 import com.farmreports.api.service.ReportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -16,6 +19,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.time.LocalDate;
 import java.util.List;
 
 @RestController
@@ -26,6 +30,7 @@ public class AdminController {
     private final AdminService adminService;
     private final ReportService reportService;
     private final ExportService exportService;
+    private final AuditService auditService;
 
     // ── Dashboard / overview ───────────────────────────────────────────────────
 
@@ -52,6 +57,8 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
         adminService.resetUserPassword(request.email(), request.newPassword());
+        auditService.log(AuditAction.PASSWORD_RESET, auth, null, null,
+                "User", null, "Password reset for: " + request.email());
         return ApiResponse.ok(null);
     }
 
@@ -87,7 +94,11 @@ public class AdminController {
             @RequestParam Integer month,
             Authentication auth) {
         requireDashboardRole(auth);
-        return ApiResponse.ok(reportService.createOrGetReport(farmId, year, month, ClaimsHelper.getUserId(auth)));
+        ReportDto report = reportService.createOrGetReport(farmId, year, month, ClaimsHelper.getUserId(auth));
+        auditService.log(AuditAction.REPORT_CREATED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(report.id()),
+                "Report created for farm " + farmId + " (" + year + "-" + String.format("%02d", month) + ")");
+        return ApiResponse.ok(report);
     }
 
     @GetMapping("/reports/{id}")
@@ -108,6 +119,9 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
         reportService.upsertAttendance(id, farmId, entries);
+        auditService.log(AuditAction.ATTENDANCE_UPDATED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(id),
+                "Attendance updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -119,6 +133,9 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
         reportService.upsertLivestock(id, farmId, entries);
+        auditService.log(AuditAction.LIVESTOCK_UPDATED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(id),
+                "Livestock returns updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -130,6 +147,9 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
         reportService.upsertMilk(id, farmId, entries);
+        auditService.log(AuditAction.MILK_UPDATED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(id),
+                "Milk production updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -141,6 +161,9 @@ public class AdminController {
             Authentication auth) {
         requireExpenseRole(auth);
         reportService.upsertExpenses(id, farmId, entries);
+        auditService.log(AuditAction.EXPENSES_UPDATED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(id),
+                "Expenses updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 
@@ -152,6 +175,8 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
         reportService.upsertAttendanceNotes(id, farmId, request);
+        auditService.log(AuditAction.ATTENDANCE_NOTES_UPDATED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(id), "Attendance notes updated");
         return ApiResponse.ok();
     }
 
@@ -163,6 +188,8 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
         reportService.upsertLivestockNotes(id, farmId, request);
+        auditService.log(AuditAction.LIVESTOCK_NOTES_UPDATED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(id), "Livestock notes updated");
         return ApiResponse.ok();
     }
 
@@ -172,7 +199,10 @@ public class AdminController {
             @RequestParam Integer farmId,
             Authentication auth) {
         requireDashboardRole(auth);
-        return ApiResponse.ok(reportService.submitReport(id, farmId));
+        ReportDto report = reportService.submitReport(id, farmId);
+        auditService.log(AuditAction.REPORT_SUBMITTED, auth, farmId, null,
+                "MonthlyReport", String.valueOf(id), "Report submitted");
+        return ApiResponse.ok(report);
     }
 
     @PostMapping("/reports/{id}/reopen")
@@ -180,7 +210,10 @@ public class AdminController {
             @PathVariable Integer id,
             Authentication auth) {
         requireAdmin(auth);
-        return ApiResponse.ok(reportService.adminReopenReport(id));
+        ReportDto report = reportService.adminReopenReport(id);
+        auditService.log(AuditAction.REPORT_REOPENED, auth, null, null,
+                "MonthlyReport", String.valueOf(id), "Report reopened");
+        return ApiResponse.ok(report);
     }
 
     // ── Excel export ───────────────────────────────────────────────────────────
@@ -203,11 +236,31 @@ public class AdminController {
         byte[] excel = exportService.generateAllFarmsExcel(year, month, entries);
         String filename = "farm-reports-" + year + "-" + String.format("%02d", month) + ".xlsx";
 
+        auditService.log(AuditAction.EXCEL_EXPORTED, auth, null, null,
+                null, null, "Excel exported for " + year + "-" + String.format("%02d", month));
+
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .contentType(MediaType.parseMediaType(
                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(excel);
+    }
+
+    // ── Audit logs ─────────────────────────────────────────────────────────────
+
+    @GetMapping("/audit-logs")
+    public ApiResponse<AuditLogPageDto> getAuditLogs(
+            @RequestParam(required = false) Integer farmId,
+            @RequestParam(required = false) Integer userId,
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size,
+            Authentication auth) {
+        requireDashboardRole(auth);
+        Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? farmId : ClaimsHelper.getFarmId(auth);
+        return ApiResponse.ok(auditService.getAuditLogs(effectiveFarmId, userId, action, startDate, endDate, page, size));
     }
 
     // ── Access helpers ─────────────────────────────────────────────────────────

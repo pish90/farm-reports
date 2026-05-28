@@ -3,9 +3,12 @@ package com.farmreports.api.controller;
 import com.farmreports.api.dto.AuthResponse;
 import com.farmreports.api.dto.ChangePasswordRequest;
 import com.farmreports.api.dto.LoginRequest;
+import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.entity.User;
 import com.farmreports.api.repository.UserRepository;
+import com.farmreports.api.security.ClaimsHelper;
 import com.farmreports.api.security.JwtService;
+import com.farmreports.api.service.AuditService;
 import io.jsonwebtoken.Claims;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,13 +32,15 @@ public class AuthController {
     private final UserRepository userRepository;
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
+    private final AuditService auditService;
 
     @PostMapping("/login")
     public AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
+        User user = userRepository.findByEmail(request.email()).orElse(null);
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        if (user == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            auditService.logAnonymous(AuditAction.LOGIN_FAILED, request.email(),
+                    "Failed login attempt for: " + request.email());
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
         }
 
@@ -51,6 +56,9 @@ public class AuthController {
         if (farmName != null) claims.put("farmName", farmName);
 
         String token = jwtService.generateToken(user.getEmail(), claims);
+
+        auditService.logLogin(AuditAction.LOGIN, user.getId(), user.getName(), user.getRole().name(),
+                farmId, farmName, "Successful login");
 
         return new AuthResponse(token, user.getId(), farmId, farmName, user.getName(), user.isMustChangePassword());
     }
@@ -74,6 +82,10 @@ public class AuthController {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         user.setMustChangePassword(false);
         userRepository.save(user);
+
+        auditService.log(AuditAction.PASSWORD_CHANGED, authentication,
+                ClaimsHelper.getFarmId(authentication), ClaimsHelper.getFarmName(authentication),
+                "User", String.valueOf(user.getId()), "Password changed");
 
         Integer farmId   = user.getFarm() != null ? user.getFarm().getId()   : null;
         String  farmName = user.getFarm() != null ? user.getFarm().getName() : null;

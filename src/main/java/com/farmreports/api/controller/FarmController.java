@@ -4,7 +4,9 @@ import com.farmreports.api.dto.ApiResponse;
 import com.farmreports.api.dto.LivestockTypeDto;
 import com.farmreports.api.dto.WorkerDto;
 import com.farmreports.api.dto.WorkerRequest;
+import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.security.ClaimsHelper;
+import com.farmreports.api.service.AuditService;
 import com.farmreports.api.service.FarmService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,7 @@ import java.util.Map;
 public class FarmController {
 
     private final FarmService farmService;
+    private final AuditService auditService;
 
     @GetMapping("/{farmId}/workers")
     public ApiResponse<List<WorkerDto>> getWorkers(@PathVariable Integer farmId, Authentication auth) {
@@ -36,7 +39,12 @@ public class FarmController {
             @Valid @RequestBody WorkerRequest request,
             Authentication auth) {
         checkFarmAccess(farmId, auth);
-        return ApiResponse.ok(farmService.addWorker(farmId, request));
+        WorkerDto worker = farmService.addWorker(farmId, request);
+        auditService.log(AuditAction.WORKER_ADDED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "Worker", String.valueOf(worker.id()),
+                "Worker added: " + worker.name());
+        return ApiResponse.ok(worker);
     }
 
     @DeleteMapping("/{farmId}/workers/{workerId}")
@@ -47,6 +55,10 @@ public class FarmController {
             Authentication auth) {
         checkFarmAccess(farmId, auth);
         farmService.deactivateWorker(farmId, workerId);
+        auditService.log(AuditAction.WORKER_DEACTIVATED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "Worker", String.valueOf(workerId),
+                "Worker deactivated (id=" + workerId + ")");
     }
 
     @GetMapping("/{farmId}/livestock-types")
