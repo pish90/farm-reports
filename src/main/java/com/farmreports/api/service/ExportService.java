@@ -2,6 +2,8 @@ package com.farmreports.api.service;
 
 import com.farmreports.api.dto.*;
 import lombok.RequiredArgsConstructor;
+
+import java.math.BigDecimal;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.ss.util.CellRangeAddress;
 import org.apache.poi.xssf.usermodel.*;
@@ -62,6 +64,11 @@ public class ExportService {
             expSheet.setColumnWidth(3, 4000);
             expSheet.setColumnWidth(4, 3500);
 
+            Sheet casualSheet = wb.createSheet("Casual Labourers");
+            buildCasualAttendanceSection(casualSheet, report, 0, s);
+            setAttendanceColumnWidths(casualSheet, days);
+            casualSheet.setColumnWidth(days + 7, 4000); // Amount Due column
+
             wb.write(out);
             return out.toByteArray();
         } catch (Exception e) {
@@ -90,7 +97,9 @@ public class ExportService {
                 row += 2;
                 row = buildMilkSection(sheet, fr.report(), row, s);
                 row += 2;
-                buildExpensesSection(sheet, fr.report(), row, s);
+                row = buildExpensesSection(sheet, fr.report(), row, s);
+                row += 2;
+                buildCasualAttendanceSection(sheet, fr.report(), row, s);
 
                 // Column widths tuned for the attendance grid
                 sheet.setColumnWidth(0, 6000);
@@ -330,6 +339,88 @@ public class ExportService {
         Cell tv2 = totalRow.createCell(4);
         tv2.setCellValue(total);
         tv2.setCellStyle(s.bold());
+
+        return rowIdx;
+    }
+
+    private int buildCasualAttendanceSection(Sheet sheet, ReportDto report, int startRow, Styles s) {
+        int days = YearMonth.of(report.year(), report.month()).lengthOfMonth();
+        List<CasualAttendanceRecordDto> records = report.casualAttendance() != null
+                ? report.casualAttendance() : List.of();
+
+        Row titleRow = sheet.createRow(startRow);
+        Cell tc = titleRow.createCell(0);
+        tc.setCellValue("Casual Labourers – " + MONTH_NAMES[report.month()] + " " + report.year());
+        tc.setCellStyle(s.title());
+        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, days + 7));
+
+        Row headerRow = sheet.createRow(startRow + 1);
+        createHdrCell(headerRow, 0, "Labourer", s.header());
+        for (int d = 1; d <= days; d++) createHdrCell(headerRow, d, String.valueOf(d), s.header());
+        createHdrCell(headerRow, days + 1, "Present", s.header());
+        createHdrCell(headerRow, days + 2, "Absent",  s.header());
+        createHdrCell(headerRow, days + 3, "Annual",  s.header());
+        createHdrCell(headerRow, days + 4, "Sick",    s.header());
+        createHdrCell(headerRow, days + 5, "Parent",  s.header());
+        createHdrCell(headerRow, days + 6, "Days",    s.header());
+        createHdrCell(headerRow, days + 7, "Amount Due", s.header());
+
+        // Group by labourer — preserve insertion order
+        Map<Integer, String> labourerNames = new LinkedHashMap<>();
+        Map<Integer, Map<Integer, CasualAttendanceRecordDto>> byLabourer = new LinkedHashMap<>();
+        for (CasualAttendanceRecordDto r : records) {
+            labourerNames.put(r.casualLabourerId(), r.casualLabourerName());
+            byLabourer.computeIfAbsent(r.casualLabourerId(), k -> new HashMap<>()).put(r.dayOfMonth(), r);
+        }
+
+        int rowIdx = startRow + 2;
+        double grandTotal = 0;
+        for (Map.Entry<Integer, String> entry : labourerNames.entrySet()) {
+            Integer labourerId = entry.getKey();
+            Map<Integer, CasualAttendanceRecordDto> dayMap = byLabourer.get(labourerId);
+
+            Row row = sheet.createRow(rowIdx++);
+            row.createCell(0).setCellValue(entry.getValue());
+
+            int cntP = 0, cntA = 0, cntAL = 0, cntSL = 0, cntPL = 0;
+            double amount = 0;
+            for (int d = 1; d <= days; d++) {
+                CasualAttendanceRecordDto rec = dayMap != null ? dayMap.get(d) : null;
+                String status = rec != null ? rec.status() : "A";
+                Cell c = row.createCell(d);
+                c.setCellValue(status);
+                c.setCellStyle(s.center());
+                switch (status) {
+                    case "P" -> {
+                        cntP++;
+                        BigDecimal rate = rec.effectiveRate();
+                        if (rate != null) amount += rate.doubleValue();
+                    }
+                    case "A"  -> cntA++;
+                    case "AL" -> cntAL++;
+                    case "SL" -> cntSL++;
+                    case "PL" -> cntPL++;
+                }
+            }
+            numCell(row, days + 1, cntP,  s);
+            numCell(row, days + 2, cntA,  s);
+            numCell(row, days + 3, cntAL, s);
+            numCell(row, days + 4, cntSL, s);
+            numCell(row, days + 5, cntPL, s);
+            numCell(row, days + 6, days,  s);
+            Cell amtCell = row.createCell(days + 7);
+            amtCell.setCellValue(amount);
+            amtCell.setCellStyle(s.num());
+            grandTotal += amount;
+        }
+
+        Row totalRow = sheet.createRow(rowIdx++);
+        Cell tc2 = totalRow.createCell(0);
+        tc2.setCellValue("TOTAL");
+        tc2.setCellStyle(s.bold());
+        Cell gt = totalRow.createCell(days + 7);
+        gt.setCellValue(grandTotal);
+        gt.setCellStyle(s.bold());
 
         return rowIdx;
     }

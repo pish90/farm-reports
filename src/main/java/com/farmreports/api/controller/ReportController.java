@@ -1,6 +1,7 @@
 package com.farmreports.api.controller;
 
 import com.farmreports.api.dto.*;
+import com.farmreports.api.dto.CasualAttendanceEntryRequest;
 import com.farmreports.api.dto.NoteRequest;
 import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.security.ClaimsHelper;
@@ -102,6 +103,19 @@ public class ReportController {
                 ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
                 "MonthlyReport", String.valueOf(id),
                 "Expenses updated (" + entries.size() + " entries)");
+        return ApiResponse.ok();
+    }
+
+    @PutMapping("/{id}/casual-attendance")
+    public ApiResponse<Void> upsertCasualAttendance(
+            @PathVariable Integer id,
+            @Valid @RequestBody List<@Valid CasualAttendanceEntryRequest> entries,
+            Authentication auth) {
+        reportService.upsertCasualAttendance(id, ClaimsHelper.getFarmId(auth), entries);
+        auditService.log(AuditAction.CASUAL_ATTENDANCE_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "MonthlyReport", String.valueOf(id),
+                "Casual attendance updated (" + entries.size() + " entries)");
         return ApiResponse.ok();
     }
 

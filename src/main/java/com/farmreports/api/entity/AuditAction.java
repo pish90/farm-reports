@@ -24,6 +24,11 @@ public enum AuditAction {
     WORKER_ADDED,
     WORKER_DEACTIVATED,
 
+    // Casual labourers
+    CASUAL_LABOURER_ADDED,
+    CASUAL_LABOURER_DEACTIVATED,
+    CASUAL_ATTENDANCE_UPDATED,
+
     // Admin
     EXCEL_EXPORTED
 }

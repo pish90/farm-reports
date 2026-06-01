@@ -110,7 +110,7 @@ public class AdminService {
             .map(r -> new ReportDto(
                 r.getId(), r.getFarm().getId(), r.getYear(), r.getMonth(),
                 r.getStatus().name(), r.getSubmittedAt(), r.getCreatedAt(),
-                null, null, null, null
+                null, null, null, null, null
             ))
             .toList();
     }

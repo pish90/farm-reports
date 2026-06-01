@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -29,6 +30,8 @@ public class ReportService {
     private final UserRepository userRepository;
     private final ExpenseCategoryRepository categoryRepository;
     private final BusinessUnitRepository businessUnitRepository;
+    private final CasualLabourerRepository casualLabourerRepository;
+    private final CasualAttendanceRepository casualAttendanceRepository;
     private final JdbcTemplate jdbc;
 
     @Transactional(readOnly = true)
@@ -186,6 +189,35 @@ public class ReportService {
         expenseRepository.saveAll(records);
     }
 
+    public void upsertCasualAttendance(Integer reportId, Integer farmId, List<CasualAttendanceEntryRequest> entries) {
+        MonthlyReport report = loadReportForFarm(reportId, farmId);
+
+        java.util.Map<String, CasualAttendanceEntryRequest> deduped = new java.util.LinkedHashMap<>();
+        for (CasualAttendanceEntryRequest e : entries) {
+            deduped.put(e.casualLabourerId() + "_" + e.dayOfMonth(), e);
+        }
+        List<CasualAttendanceEntryRequest> uniqueEntries = new java.util.ArrayList<>(deduped.values());
+
+        casualAttendanceRepository.deleteByReportId(reportId);
+
+        List<CasualAttendance> records = uniqueEntries.stream().map(e -> {
+            CasualLabourer labourer = casualLabourerRepository.findByIdAndFarmId(e.casualLabourerId(), farmId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Casual labourer not found: " + e.casualLabourerId()));
+            CasualAttendance ca = new CasualAttendance();
+            ca.setReport(report);
+            ca.setCasualLabourer(labourer);
+            ca.setDayOfMonth(e.dayOfMonth());
+            String status = e.status() != null ? e.status() : (Boolean.TRUE.equals(e.present()) ? "P" : "A");
+            ca.setStatus(status);
+            ca.setPresent("P".equals(status));
+            ca.setRateOverride(e.rateOverride());
+            return ca;
+        }).toList();
+
+        casualAttendanceRepository.saveAll(records);
+    }
+
     public ReportDto submitReport(Integer reportId, Integer farmId) {
         MonthlyReport report = loadReportForFarm(reportId, farmId);
 
@@ -302,6 +334,25 @@ public class ReportService {
                                 .toList()))
                 .toList();
 
+        List<CasualAttendanceRecordDto> casualAttendance = casualAttendanceRepository
+                .findByReportId(report.getId())
+                .stream()
+                .map(ca -> {
+                    BigDecimal effective = ca.getRateOverride() != null
+                            ? ca.getRateOverride()
+                            : ca.getCasualLabourer().getDefaultDailyRate();
+                    return new CasualAttendanceRecordDto(
+                            ca.getId(),
+                            ca.getCasualLabourer().getId(),
+                            ca.getCasualLabourer().getName(),
+                            ca.getDayOfMonth(),
+                            ca.isPresent(),
+                            ca.getStatus(),
+                            ca.getRateOverride(),
+                            effective);
+                })
+                .toList();
+
         return new ReportDto(
                 report.getId(),
                 report.getFarm().getId(),
@@ -313,7 +364,8 @@ public class ReportService {
                 attendance,
                 livestock,
                 milk,
-                expenses
+                expenses,
+                casualAttendance
         );
     }
 }

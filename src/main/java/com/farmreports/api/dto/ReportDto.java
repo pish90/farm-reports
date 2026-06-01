@@ -17,5 +17,6 @@ public record ReportDto(
         List<AttendanceRecordDto> attendance,
         List<LivestockRecordDto> livestock,
         List<MilkRecordDto> milk,
-        List<ExpenseRecordDto> expenses
+        List<ExpenseRecordDto> expenses,
+        List<CasualAttendanceRecordDto> casualAttendance
 ) {}
