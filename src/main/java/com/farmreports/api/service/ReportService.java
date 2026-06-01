@@ -61,9 +61,17 @@ public class ReportService {
                 "Cannot replace existing attendance records with an empty list");
         }
 
+        // Deduplicate by (workerId, dayOfMonth) — last entry wins — guards against
+        // mobile devices occasionally sending duplicate rows in the same payload
+        java.util.Map<String, AttendanceEntryRequest> deduped = new java.util.LinkedHashMap<>();
+        for (AttendanceEntryRequest e : entries) {
+            deduped.put(e.workerId() + "_" + e.dayOfMonth(), e);
+        }
+        List<AttendanceEntryRequest> uniqueEntries = new java.util.ArrayList<>(deduped.values());
+
         attendanceRepository.deleteByReportId(reportId);
 
-        List<Attendance> records = entries.stream().map(e -> {
+        List<Attendance> records = uniqueEntries.stream().map(e -> {
             Worker worker = workerRepository.findByIdAndFarmId(e.workerId(), farmId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "Worker not found: " + e.workerId()));
