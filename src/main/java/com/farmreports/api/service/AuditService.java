@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -73,10 +74,10 @@ public class AuditService {
         LocalDateTime end   = endDate   != null ? endDate.atTime(23, 59, 59) : null;
 
         String actionName = auditAction != null ? auditAction.name() : null;
-        Page<AuditLog> results = auditLogRepository.findFiltered(
+        Page<Object[]> results = auditLogRepository.findFiltered(
                 farmId, userId, actionName, start, end, PageRequest.of(page, size));
 
-        List<AuditLogDto> content = results.getContent().stream().map(this::toDto).toList();
+        List<AuditLogDto> content = results.getContent().stream().map(this::rowToDto).toList();
         return new AuditLogPageDto(content, results.getTotalElements(),
                 results.getTotalPages(), page, size);
     }
@@ -119,14 +120,36 @@ public class AuditService {
         }
     }
 
-    private AuditLogDto toDto(AuditLog a) {
-        return new AuditLogDto(
-                a.getId(), a.getTimestamp(),
-                a.getUserId(), a.getUserName(), a.getUserRole(),
-                a.getFarmId(), a.getFarmName(),
-                a.getAction(),
-                a.getEntityType(), a.getEntityId(),
-                a.getDescription(), a.getIpAddress()
-        );
+    // Column order matches the SELECT in AuditLogRepository.findFiltered:
+    // 0:id  1:timestamp  2:user_id  3:user_name  4:user_role
+    // 5:farm_id  6:farm_name  7:action  8:entity_type  9:entity_id  10:description  11:ip_address
+    private AuditLogDto rowToDto(Object[] row) {
+        Long id = row[0] != null ? ((Number) row[0]).longValue() : null;
+
+        LocalDateTime timestamp = null;
+        if (row[1] instanceof Timestamp ts) {
+            timestamp = ts.toLocalDateTime();
+        } else if (row[1] instanceof LocalDateTime ldt) {
+            timestamp = ldt;
+        }
+
+        Integer userId   = row[2] != null ? ((Number) row[2]).intValue() : null;
+        String  userName = (String) row[3];
+        String  userRole = (String) row[4];
+        Integer farmId   = row[5] != null ? ((Number) row[5]).intValue() : null;
+        String  farmName = (String) row[6];
+
+        AuditAction action = null;
+        if (row[7] instanceof String s) {
+            try { action = AuditAction.valueOf(s); } catch (IllegalArgumentException ignored) {}
+        }
+
+        String entityType  = (String) row[8];
+        String entityId    = (String) row[9];
+        String description = (String) row[10];
+        String ipAddress   = (String) row[11];
+
+        return new AuditLogDto(id, timestamp, userId, userName, userRole,
+                farmId, farmName, action, entityType, entityId, description, ipAddress);
     }
 }

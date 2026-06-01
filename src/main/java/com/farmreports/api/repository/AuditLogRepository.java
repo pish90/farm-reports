@@ -13,7 +13,10 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
 
     @Query(
         value = """
-            SELECT * FROM audit_logs
+            SELECT id, timestamp, user_id, user_name, user_role,
+                   farm_id, farm_name, action,
+                   entity_type, entity_id, description, ip_address
+            FROM audit_logs
             WHERE (:farmId IS NULL OR farm_id = :farmId)
               AND (:userId  IS NULL OR user_id  = :userId)
               AND (:action  IS NULL OR action   = :action)
@@ -31,7 +34,7 @@ public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
             """,
         nativeQuery = true
     )
-    Page<AuditLog> findFiltered(
+    Page<Object[]> findFiltered(
             @Param("farmId")    Integer farmId,
             @Param("userId")    Integer userId,
             @Param("action")    String action,
