@@ -52,7 +52,9 @@ public class ReportService {
     }
 
     public void upsertAttendance(Integer reportId, Integer farmId, List<AttendanceEntryRequest> entries) {
-        MonthlyReport report = loadReportForFarm(reportId, farmId);
+        // Pessimistic write lock so concurrent syncs from multiple devices don't race
+        MonthlyReport report = reportRepository.findByIdAndFarmIdForUpdate(reportId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report not found"));
 
         if (entries.isEmpty() && attendanceRepository.existsByReportId(reportId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
