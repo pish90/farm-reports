@@ -72,8 +72,9 @@ public class AuditService {
         LocalDateTime start = startDate != null ? startDate.atStartOfDay() : null;
         LocalDateTime end   = endDate   != null ? endDate.atTime(23, 59, 59) : null;
 
+        String actionName = auditAction != null ? auditAction.name() : null;
         Page<AuditLog> results = auditLogRepository.findFiltered(
-                farmId, userId, auditAction, start, end, PageRequest.of(page, size));
+                farmId, userId, actionName, start, end, PageRequest.of(page, size));
 
         List<AuditLogDto> content = results.getContent().stream().map(this::toDto).toList();
         return new AuditLogPageDto(content, results.getTotalElements(),
