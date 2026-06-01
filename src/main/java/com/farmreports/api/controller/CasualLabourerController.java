@@ -108,6 +108,18 @@ public class CasualLabourerController {
                 "Payment deleted (id=" + paymentId + ")");
     }
 
+    // ── Monthly payroll (JSON list) ───────────────────────────────────────────
+
+    @GetMapping("/{farmId}/casual-labourers/payroll")
+    public ApiResponse<List<CasualPayrollEntryDto>> getMonthlyPayroll(
+            @PathVariable Integer farmId,
+            @RequestParam Integer year,
+            @RequestParam Integer month,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        return ApiResponse.ok(casualLabourerService.getMonthlyPayroll(farmId, year, month));
+    }
+
     // ── Export ────────────────────────────────────────────────────────────────
 
     @GetMapping("/{farmId}/casual-labourers/export")

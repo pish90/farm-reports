@@ -116,6 +116,44 @@ public class CasualLabourerService {
         paymentRepository.delete(payment);
     }
 
+    // ── Monthly payroll (JSON) ────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public List<CasualPayrollEntryDto> getMonthlyPayroll(Integer farmId, Integer year, Integer month) {
+        List<CasualLabourer> labourers = casualLabourerRepository.findByFarmIdAndActiveTrue(farmId);
+
+        Integer reportId = getReportIdForMonth(farmId, year, month);
+        var monthAttendance = reportId != null
+                ? casualAttendanceRepository.findByReportId(reportId)
+                : List.<com.farmreports.api.entity.CasualAttendance>of();
+
+        return labourers.stream().map(l -> {
+            var mine = monthAttendance.stream()
+                    .filter(ca -> ca.getCasualLabourer().getId().equals(l.getId()) && ca.isPresent())
+                    .toList();
+
+            BigDecimal monthEarnings = mine.stream()
+                    .map(ca -> ca.getRateOverride() != null ? ca.getRateOverride() : l.getDefaultDailyRate())
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            BigDecimal allTimePaid   = paymentRepository.sumAmountByLabourerId(l.getId());
+            BigDecimal allTimeEarned = casualAttendanceRepository.sumAllTimeEarnedByLabourerId(l.getId());
+            BigDecimal outstanding   = allTimeEarned.subtract(allTimePaid);
+
+            String photoBase64 = l.getPhotoData() != null
+                    ? Base64.getEncoder().encodeToString(l.getPhotoData())
+                    : null;
+
+            return new CasualPayrollEntryDto(
+                    l.getId(), l.getName(), l.getPhone(),
+                    photoBase64, l.getPhotoMimeType(),
+                    l.getDefaultDailyRate(),
+                    mine.size(),
+                    monthEarnings, allTimePaid, outstanding
+            );
+        }).toList();
+    }
+
     // ── Export ────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
