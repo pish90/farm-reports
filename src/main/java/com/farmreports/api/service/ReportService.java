@@ -212,6 +212,7 @@ public class ReportService {
             ca.setStatus(status);
             ca.setPresent("P".equals(status));
             ca.setRateOverride(e.rateOverride());
+            ca.setTaskDescription(e.taskDescription());
             return ca;
         }).toList();
 
@@ -349,7 +350,8 @@ public class ReportService {
                             ca.isPresent(),
                             ca.getStatus(),
                             ca.getRateOverride(),
-                            effective);
+                            effective,
+                            ca.getTaskDescription());
                 })
                 .toList();
 

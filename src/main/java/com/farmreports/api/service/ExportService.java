@@ -28,6 +28,13 @@ public class ExportService {
 
     public record FarmReport(String farmName, ReportDto report) {}
 
+    public record CasualLabourerRow(String name, String phone, BigDecimal monthEarnings,
+                                    BigDecimal totalPaid, BigDecimal outstanding) {}
+    public record CasualWorkLogRow(String labourerName, int day, int year, int month,
+                                   String taskDescription, BigDecimal rate, BigDecimal amount) {}
+    public record CasualPaymentRow(String labourerName, java.time.LocalDate date,
+                                   BigDecimal amount, String note, String paidBy) {}
+
     private record Styles(CellStyle header, CellStyle title, CellStyle num, CellStyle bold, CellStyle center) {}
 
     // ── Single-farm export ─────────────────────────────────────────────────────
@@ -341,6 +348,139 @@ public class ExportService {
         tv2.setCellStyle(s.bold());
 
         return rowIdx;
+    }
+
+    // ── Standalone casual monthly export ──────────────────────────────────────
+
+    public byte[] generateCasualMonthlyExcel(int year, int month,
+                                              List<CasualLabourerRow> summary,
+                                              List<CasualWorkLogRow> workLog,
+                                              List<CasualPaymentRow> payments) {
+        try (XSSFWorkbook wb = new XSSFWorkbook();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+
+            Styles s = createStyles(wb);
+
+            // Sheet 1: Summary
+            Sheet sumSheet = wb.createSheet("Summary");
+            Row sumTitle = sumSheet.createRow(0);
+            Cell stc = sumTitle.createCell(0);
+            stc.setCellValue("Casual Labour Summary – " + MONTH_NAMES[month] + " " + year);
+            stc.setCellStyle(s.title());
+            sumSheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 5));
+
+            Row sumHdr = sumSheet.createRow(1);
+            createHdrCell(sumHdr, 0, "Name",              s.header());
+            createHdrCell(sumHdr, 1, "Phone",             s.header());
+            createHdrCell(sumHdr, 2, "Month Earnings",    s.header());
+            createHdrCell(sumHdr, 3, "Total Paid",        s.header());
+            createHdrCell(sumHdr, 4, "Outstanding",       s.header());
+
+            int ri = 2;
+            BigDecimal totEarned = BigDecimal.ZERO, totPaid = BigDecimal.ZERO, totOut = BigDecimal.ZERO;
+            for (CasualLabourerRow r : summary) {
+                Row row = sumSheet.createRow(ri++);
+                row.createCell(0).setCellValue(r.name());
+                row.createCell(1).setCellValue(r.phone() != null ? r.phone() : "");
+                numDecCell(row, 2, r.monthEarnings(), s);
+                numDecCell(row, 3, r.totalPaid(), s);
+                numDecCell(row, 4, r.outstanding(), s);
+                totEarned = totEarned.add(r.monthEarnings());
+                totPaid   = totPaid.add(r.totalPaid());
+                totOut    = totOut.add(r.outstanding());
+            }
+            Row totRow = sumSheet.createRow(ri);
+            Cell tc = totRow.createCell(0);
+            tc.setCellValue("TOTAL");
+            tc.setCellStyle(s.bold());
+            numDecCell(totRow, 2, totEarned, s);
+            numDecCell(totRow, 3, totPaid,   s);
+            numDecCell(totRow, 4, totOut,    s);
+
+            sumSheet.setColumnWidth(0, 6000);
+            sumSheet.setColumnWidth(1, 4000);
+            for (int c = 2; c <= 4; c++) sumSheet.setColumnWidth(c, 4000);
+
+            // Sheet 2: Work Log
+            Sheet wlSheet = wb.createSheet("Work Log");
+            Row wlTitle = wlSheet.createRow(0);
+            Cell wltc = wlTitle.createCell(0);
+            wltc.setCellValue("Daily Work Log – " + MONTH_NAMES[month] + " " + year);
+            wltc.setCellStyle(s.title());
+            wlSheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 4));
+
+            Row wlHdr = wlSheet.createRow(1);
+            createHdrCell(wlHdr, 0, "Labourer",    s.header());
+            createHdrCell(wlHdr, 1, "Day",         s.header());
+            createHdrCell(wlHdr, 2, "Date",        s.header());
+            createHdrCell(wlHdr, 3, "Task",        s.header());
+            createHdrCell(wlHdr, 4, "Rate",        s.header());
+
+            int wi = 2;
+            for (CasualWorkLogRow r : workLog) {
+                Row row = wlSheet.createRow(wi++);
+                row.createCell(0).setCellValue(r.labourerName());
+                row.createCell(1).setCellValue(r.day());
+                java.time.LocalDate date = java.time.LocalDate.of(r.year(), r.month(), r.day());
+                row.createCell(2).setCellValue(date.format(DATE_FMT));
+                row.createCell(3).setCellValue(r.taskDescription() != null ? r.taskDescription() : "");
+                numDecCell(row, 4, r.rate(), s);
+            }
+            wlSheet.setColumnWidth(0, 6000);
+            wlSheet.setColumnWidth(1, 1800);
+            wlSheet.setColumnWidth(2, 3500);
+            wlSheet.setColumnWidth(3, 7000);
+            wlSheet.setColumnWidth(4, 3500);
+
+            // Sheet 3: Payments
+            Sheet pySheet = wb.createSheet("Payments");
+            Row pyTitle = pySheet.createRow(0);
+            Cell pytc = pyTitle.createCell(0);
+            pytc.setCellValue("Payment History");
+            pytc.setCellStyle(s.title());
+            pySheet.addMergedRegion(new CellRangeAddress(0, 0, 0, 4));
+
+            Row pyHdr = pySheet.createRow(1);
+            createHdrCell(pyHdr, 0, "Labourer",  s.header());
+            createHdrCell(pyHdr, 1, "Date",      s.header());
+            createHdrCell(pyHdr, 2, "Amount",    s.header());
+            createHdrCell(pyHdr, 3, "Note",      s.header());
+            createHdrCell(pyHdr, 4, "Paid By",   s.header());
+
+            int pi = 2;
+            BigDecimal grandPayTotal = BigDecimal.ZERO;
+            for (CasualPaymentRow r : payments) {
+                Row row = pySheet.createRow(pi++);
+                row.createCell(0).setCellValue(r.labourerName());
+                row.createCell(1).setCellValue(r.date() != null ? r.date().format(DATE_FMT) : "");
+                numDecCell(row, 2, r.amount(), s);
+                row.createCell(3).setCellValue(r.note() != null ? r.note() : "");
+                row.createCell(4).setCellValue(r.paidBy() != null ? r.paidBy() : "");
+                grandPayTotal = grandPayTotal.add(r.amount());
+            }
+            Row pyTotRow = pySheet.createRow(pi);
+            Cell ptc = pyTotRow.createCell(1);
+            ptc.setCellValue("TOTAL");
+            ptc.setCellStyle(s.bold());
+            numDecCell(pyTotRow, 2, grandPayTotal, s);
+
+            pySheet.setColumnWidth(0, 6000);
+            pySheet.setColumnWidth(1, 3500);
+            pySheet.setColumnWidth(2, 3500);
+            pySheet.setColumnWidth(3, 8000);
+            pySheet.setColumnWidth(4, 5000);
+
+            wb.write(out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate casual labour Excel report", e);
+        }
+    }
+
+    private void numDecCell(Row row, int col, BigDecimal value, Styles s) {
+        Cell c = row.createCell(col);
+        c.setCellValue(value != null ? value.doubleValue() : 0);
+        c.setCellStyle(s.num());
     }
 
     private int buildCasualAttendanceSection(Sheet sheet, ReportDto report, int startRow, Styles s) {

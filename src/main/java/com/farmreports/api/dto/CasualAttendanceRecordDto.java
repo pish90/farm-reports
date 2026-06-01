@@ -10,5 +10,6 @@ public record CasualAttendanceRecordDto(
         boolean present,
         String status,
         BigDecimal rateOverride,
-        BigDecimal effectiveRate
+        BigDecimal effectiveRate,
+        String taskDescription
 ) {}

@@ -9,5 +9,6 @@ public record CasualAttendanceEntryRequest(
         @NotNull Integer dayOfMonth,
         @NotNull Boolean present,
         String status,
-        BigDecimal rateOverride
+        BigDecimal rateOverride,
+        String taskDescription
 ) {}

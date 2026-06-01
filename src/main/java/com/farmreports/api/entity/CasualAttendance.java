@@ -37,4 +37,7 @@ public class CasualAttendance {
 
     @Column(name = "rate_override")
     private BigDecimal rateOverride;
+
+    @Column(name = "task_description", length = 255)
+    private String taskDescription;
 }
