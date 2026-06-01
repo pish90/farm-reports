@@ -14,4 +14,6 @@ public interface AttendanceRepository extends JpaRepository<Attendance, Integer>
 
     @Query("SELECT COUNT(DISTINCT a.dayOfMonth) FROM Attendance a WHERE a.report.id = :reportId")
     long countDistinctDaysByReportId(@Param("reportId") Integer reportId);
+
+    boolean existsByReportId(Integer reportId);
 }

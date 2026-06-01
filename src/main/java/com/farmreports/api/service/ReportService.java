@@ -53,6 +53,12 @@ public class ReportService {
 
     public void upsertAttendance(Integer reportId, Integer farmId, List<AttendanceEntryRequest> entries) {
         MonthlyReport report = loadReportForFarm(reportId, farmId);
+
+        if (entries.isEmpty() && attendanceRepository.existsByReportId(reportId)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                "Cannot replace existing attendance records with an empty list");
+        }
+
         attendanceRepository.deleteByReportId(reportId);
 
         List<Attendance> records = entries.stream().map(e -> {
