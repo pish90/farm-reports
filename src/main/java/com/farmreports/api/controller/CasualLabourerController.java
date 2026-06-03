@@ -132,6 +132,21 @@ public class CasualLabourerController {
         return ApiResponse.ok(session);
     }
 
+    @PutMapping("/{farmId}/casual-labourers/work-sessions/{sessionId}")
+    public ApiResponse<CasualWorkSessionDto> updateWorkSession(
+            @PathVariable Integer farmId,
+            @PathVariable Integer sessionId,
+            @Valid @RequestBody CreateWorkSessionRequest request,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        CasualWorkSessionDto session = casualLabourerService.updateWorkSession(farmId, sessionId, request);
+        auditService.log(AuditAction.CASUAL_LABOURER_ADDED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "CasualWorkSession", String.valueOf(session.id()),
+                "Work session updated: " + session.activity() + " on " + session.sessionDate());
+        return ApiResponse.ok(session);
+    }
+
     @DeleteMapping("/{farmId}/casual-labourers/work-sessions/{sessionId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteWorkSession(

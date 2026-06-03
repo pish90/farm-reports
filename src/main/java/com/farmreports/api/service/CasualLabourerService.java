@@ -88,6 +88,30 @@ public class CasualLabourerService {
         return toSessionDto(workSessionRepository.save(session));
     }
 
+    @Transactional
+    public CasualWorkSessionDto updateWorkSession(Integer farmId, Integer sessionId, CreateWorkSessionRequest request) {
+        CasualWorkSession session = workSessionRepository.findByIdAndFarmId(sessionId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Work session not found"));
+
+        session.setSessionDate(request.sessionDate());
+        session.setActivity(request.activity().trim());
+        session.setDefaultDailyRate(request.defaultDailyRate());
+
+        session.getEntries().clear();
+        for (WorkSessionEntryRequest er : request.entries()) {
+            CasualLabourer labourer = casualLabourerRepository.findByIdAndFarmId(er.casualLabourerId(), farmId)
+                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                            "Casual labourer not found: " + er.casualLabourerId()));
+            CasualWorkEntry entry = new CasualWorkEntry();
+            entry.setSession(session);
+            entry.setCasualLabourer(labourer);
+            entry.setRateOverride(er.rateOverride());
+            session.getEntries().add(entry);
+        }
+
+        return toSessionDto(workSessionRepository.save(session));
+    }
+
     @Transactional(readOnly = true)
     public List<CasualWorkSessionDto> getWorkSessions(Integer farmId) {
         return workSessionRepository.findByFarmIdWithEntries(farmId)
