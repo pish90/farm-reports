@@ -20,7 +20,7 @@ public interface CasualAttendanceRepository extends JpaRepository<CasualAttendan
     @Query(value = """
             SELECT COALESCE(SUM(
                 CASE WHEN ca.present = true
-                     THEN COALESCE(ca.rate_override, cl.default_daily_rate)
+                     THEN COALESCE(ca.rate_override, cl.default_daily_rate, 0)
                      ELSE 0 END
             ), 0)
             FROM casual_attendance ca

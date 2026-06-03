@@ -341,7 +341,8 @@ public class ReportService {
                 .map(ca -> {
                     BigDecimal effective = ca.getRateOverride() != null
                             ? ca.getRateOverride()
-                            : ca.getCasualLabourer().getDefaultDailyRate();
+                            : (ca.getCasualLabourer().getDefaultDailyRate() != null
+                                    ? ca.getCasualLabourer().getDefaultDailyRate() : BigDecimal.ZERO);
                     return new CasualAttendanceRecordDto(
                             ca.getId(),
                             ca.getCasualLabourer().getId(),

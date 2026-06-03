@@ -108,6 +108,53 @@ public class CasualLabourerController {
                 "Payment deleted (id=" + paymentId + ")");
     }
 
+    // ── Work Sessions ─────────────────────────────────────────────────────────
+
+    @GetMapping("/{farmId}/casual-labourers/work-sessions")
+    public ApiResponse<List<CasualWorkSessionDto>> getWorkSessions(
+            @PathVariable Integer farmId, Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        return ApiResponse.ok(casualLabourerService.getWorkSessions(farmId));
+    }
+
+    @PostMapping("/{farmId}/casual-labourers/work-sessions")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<CasualWorkSessionDto> createWorkSession(
+            @PathVariable Integer farmId,
+            @Valid @RequestBody CreateWorkSessionRequest request,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        CasualWorkSessionDto session = casualLabourerService.createWorkSession(farmId, request);
+        auditService.log(AuditAction.CASUAL_LABOURER_ADDED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "CasualWorkSession", String.valueOf(session.id()),
+                "Work session created: " + session.activity() + " on " + session.sessionDate());
+        return ApiResponse.ok(session);
+    }
+
+    @DeleteMapping("/{farmId}/casual-labourers/work-sessions/{sessionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteWorkSession(
+            @PathVariable Integer farmId,
+            @PathVariable Integer sessionId,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        casualLabourerService.deleteWorkSession(farmId, sessionId);
+        auditService.log(AuditAction.CASUAL_LABOURER_DEACTIVATED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "CasualWorkSession", String.valueOf(sessionId),
+                "Work session deleted (id=" + sessionId + ")");
+    }
+
+    // ── All-Summaries Report ──────────────────────────────────────────────────
+
+    @GetMapping("/{farmId}/casual-labourers/all-summaries")
+    public ApiResponse<List<CasualLabourerReportDto>> getAllSummaries(
+            @PathVariable Integer farmId, Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        return ApiResponse.ok(casualLabourerService.getAllSummaries(farmId));
+    }
+
     // ── Monthly payroll (JSON list) ───────────────────────────────────────────
 
     @GetMapping("/{farmId}/casual-labourers/payroll")

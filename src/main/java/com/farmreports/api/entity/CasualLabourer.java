@@ -34,7 +34,7 @@ public class CasualLabourer {
     @Column(name = "photo_mime_type")
     private String photoMimeType;
 
-    @Column(name = "default_daily_rate", nullable = false)
+    @Column(name = "default_daily_rate")
     private BigDecimal defaultDailyRate;
 
     @Column(nullable = false)

@@ -11,7 +11,6 @@ public record CasualPayrollEntryDto(
         String phone,
         String photoBase64,
         String photoMimeType,
-        BigDecimal defaultDailyRate,
         Integer daysPresent,
         BigDecimal monthEarnings,
         BigDecimal allTimePaid,
