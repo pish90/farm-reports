@@ -16,7 +16,7 @@ INSERT INTO users (farm_id, name, email, password_hash, role, created_at)
 SELECT f.id,
        f.name || ' Admin',
        lower(replace(f.name, ' ', '')) || '@farmreports.local',
-       '$2a$10$RlfO3Cgv2ulVh2B3gMcxGOz.hNiSyZfxJTz92x50IlSlYz8CSLlXe',
+       '$2a$10$rDkPvvAFV8BtmrILYHohkuKhiLByB8p7LBN0cPbkYQQXNJ/nmhO9K',
        'ADMIN',
        NOW()
 FROM farms f;
