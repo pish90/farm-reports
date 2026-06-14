@@ -49,6 +49,21 @@ public class CasualLabourerController {
         return ApiResponse.ok(labourer);
     }
 
+    @PutMapping("/{farmId}/casual-labourers/{labourerId}")
+    public ApiResponse<CasualLabourerDto> updateCasualLabourer(
+            @PathVariable Integer farmId,
+            @PathVariable Integer labourerId,
+            @Valid @RequestBody CasualLabourerRequest request,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        CasualLabourerDto labourer = casualLabourerService.updateCasualLabourer(farmId, labourerId, request);
+        auditService.log(AuditAction.CASUAL_LABOURER_UPDATED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "CasualLabourer", String.valueOf(labourer.id()),
+                "Casual labourer updated: " + labourer.name());
+        return ApiResponse.ok(labourer);
+    }
+
     @DeleteMapping("/{farmId}/casual-labourers/{labourerId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deactivateCasualLabourer(

@@ -55,6 +55,19 @@ public class CasualLabourerService {
     }
 
     @Transactional
+    public CasualLabourerDto updateCasualLabourer(Integer farmId, Integer labourerId, CasualLabourerRequest request) {
+        CasualLabourer labourer = casualLabourerRepository.findByIdAndFarmId(labourerId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
+        labourer.setName(request.name().trim());
+        labourer.setPhone(request.phone() != null && !request.phone().isBlank() ? request.phone().trim() : null);
+        if (request.photoBase64() != null && !request.photoBase64().isBlank()) {
+            labourer.setPhotoData(Base64.getDecoder().decode(request.photoBase64()));
+            labourer.setPhotoMimeType(request.photoMimeType() != null ? request.photoMimeType() : "image/jpeg");
+        }
+        return toDto(casualLabourerRepository.save(labourer));
+    }
+
+    @Transactional
     public void deactivateCasualLabourer(Integer farmId, Integer labourerId) {
         CasualLabourer labourer = casualLabourerRepository.findByIdAndFarmId(labourerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
