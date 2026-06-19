@@ -10,11 +10,11 @@ import java.util.Optional;
 
 public interface CasualWorkSessionRepository extends JpaRepository<CasualWorkSession, Integer> {
 
-    @Query("SELECT s FROM CasualWorkSession s LEFT JOIN FETCH s.entries e LEFT JOIN FETCH e.casualLabourer " +
+    @Query("SELECT s FROM CasualWorkSession s LEFT JOIN FETCH s.entries e LEFT JOIN FETCH e.employee " +
            "WHERE s.farm.id = :farmId ORDER BY s.sessionDate DESC")
     List<CasualWorkSession> findByFarmIdWithEntries(@Param("farmId") Integer farmId);
 
-    @Query("SELECT s FROM CasualWorkSession s LEFT JOIN FETCH s.entries e LEFT JOIN FETCH e.casualLabourer " +
+    @Query("SELECT s FROM CasualWorkSession s LEFT JOIN FETCH s.entries e LEFT JOIN FETCH e.employee " +
            "WHERE s.id = :id AND s.farm.id = :farmId")
     Optional<CasualWorkSession> findByIdAndFarmId(@Param("id") Integer id, @Param("farmId") Integer farmId);
 }
