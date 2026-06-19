@@ -2,7 +2,7 @@
 -- Merge workers and casual_labourers into a single employees table.
 -- All dependent FK columns keep their names; only their target table changes.
 
--- ── 1. Employee ID sequences (one row per farm-name prefix) ──────────────────
+-- ── 1. Employee ID sequences ─────────────────────────────────────────────────
 CREATE TABLE employee_id_sequences (
     prefix      VARCHAR(10) PRIMARY KEY,
     last_number INTEGER     NOT NULL DEFAULT 0
@@ -41,7 +41,7 @@ CREATE TABLE employees (
     old_casual_labourer_id INTEGER
 );
 
--- ── 4. Migrate existing data ─────────────────────────────────────────────────
+-- ── 4. Populate employees from existing tables ───────────────────────────────
 DO $$
 DECLARE
     v_rec    RECORD;
@@ -57,12 +57,12 @@ BEGIN
         ORDER BY f.name, w.id
     LOOP
         v_prefix := CASE v_rec.farm_name
-            WHEN 'Les A'    THEN 'LES'
-            WHEN 'Les B'    THEN 'LES'
-            WHEN 'Kenlet'   THEN 'KEN'
-            WHEN 'Matunda'  THEN 'MAT'
-            WHEN 'Siyoi'    THEN 'SIY'
-            ELSE                 'EMP'
+            WHEN 'Les A'   THEN 'LES'
+            WHEN 'Les B'   THEN 'LES'
+            WHEN 'Kenlet'  THEN 'KEN'
+            WHEN 'Matunda' THEN 'MAT'
+            WHEN 'Siyoi'   THEN 'SIY'
+            ELSE                'EMP'
         END;
 
         UPDATE employee_id_sequences
@@ -89,12 +89,12 @@ BEGIN
         ORDER BY f.name, cl.id
     LOOP
         v_prefix := CASE v_rec.farm_name
-            WHEN 'Les A'    THEN 'LES'
-            WHEN 'Les B'    THEN 'LES'
-            WHEN 'Kenlet'   THEN 'KEN'
-            WHEN 'Matunda'  THEN 'MAT'
-            WHEN 'Siyoi'    THEN 'SIY'
-            ELSE                 'EMP'
+            WHEN 'Les A'   THEN 'LES'
+            WHEN 'Les B'   THEN 'LES'
+            WHEN 'Kenlet'  THEN 'KEN'
+            WHEN 'Matunda' THEN 'MAT'
+            WHEN 'Siyoi'   THEN 'SIY'
+            ELSE                'EMP'
         END;
 
         UPDATE employee_id_sequences
@@ -117,7 +117,25 @@ BEGIN
 END;
 $$;
 
--- ── 5. Re-point FK column values to the new employee IDs ────────────────────
+-- ── 5. Drop old FK constraints FIRST (before updating column values) ─────────
+-- This prevents FK violations when we point the columns at new employee IDs.
+
+ALTER TABLE attendance
+    DROP CONSTRAINT attendance_worker_id_fkey;
+
+ALTER TABLE attendance_worker_notes
+    DROP CONSTRAINT attendance_worker_notes_worker_id_fkey;
+
+ALTER TABLE casual_attendance
+    DROP CONSTRAINT casual_attendance_casual_labourer_id_fkey;
+
+ALTER TABLE casual_work_entries
+    DROP CONSTRAINT casual_work_entries_casual_labourer_id_fkey;
+
+ALTER TABLE casual_labourer_payments
+    DROP CONSTRAINT casual_labourer_payments_casual_labourer_id_fkey;
+
+-- ── 6. Re-point FK column values to the new employee IDs ────────────────────
 UPDATE attendance a
    SET worker_id = e.id
   FROM employees e
@@ -143,37 +161,32 @@ UPDATE casual_labourer_payments p
   FROM employees e
  WHERE e.old_casual_labourer_id = p.casual_labourer_id;
 
--- ── 6. Swap FK targets to employees ─────────────────────────────────────────
+-- ── 7. Add new FK constraints pointing to employees ──────────────────────────
 ALTER TABLE attendance
-    DROP CONSTRAINT attendance_worker_id_fkey,
-    ADD  CONSTRAINT attendance_employee_id_fkey
-         FOREIGN KEY (worker_id) REFERENCES employees(id);
+    ADD CONSTRAINT attendance_employee_id_fkey
+        FOREIGN KEY (worker_id) REFERENCES employees(id);
 
 ALTER TABLE attendance_worker_notes
-    DROP CONSTRAINT attendance_worker_notes_worker_id_fkey,
-    ADD  CONSTRAINT attendance_worker_notes_employee_id_fkey
-         FOREIGN KEY (worker_id) REFERENCES employees(id);
+    ADD CONSTRAINT attendance_worker_notes_employee_id_fkey
+        FOREIGN KEY (worker_id) REFERENCES employees(id);
 
 ALTER TABLE casual_attendance
-    DROP CONSTRAINT casual_attendance_casual_labourer_id_fkey,
-    ADD  CONSTRAINT casual_attendance_employee_id_fkey
-         FOREIGN KEY (casual_labourer_id) REFERENCES employees(id);
+    ADD CONSTRAINT casual_attendance_employee_id_fkey
+        FOREIGN KEY (casual_labourer_id) REFERENCES employees(id);
 
 ALTER TABLE casual_work_entries
-    DROP CONSTRAINT casual_work_entries_casual_labourer_id_fkey,
-    ADD  CONSTRAINT casual_work_entries_employee_id_fkey
-         FOREIGN KEY (casual_labourer_id) REFERENCES employees(id);
+    ADD CONSTRAINT casual_work_entries_employee_id_fkey
+        FOREIGN KEY (casual_labourer_id) REFERENCES employees(id);
 
 ALTER TABLE casual_labourer_payments
-    DROP CONSTRAINT casual_labourer_payments_casual_labourer_id_fkey,
-    ADD  CONSTRAINT casual_labourer_payments_employee_id_fkey
-         FOREIGN KEY (casual_labourer_id) REFERENCES employees(id);
+    ADD CONSTRAINT casual_labourer_payments_employee_id_fkey
+        FOREIGN KEY (casual_labourer_id) REFERENCES employees(id);
 
--- ── 7. Drop temp migration columns ──────────────────────────────────────────
+-- ── 8. Remove temporary mapping columns ─────────────────────────────────────
 ALTER TABLE employees
     DROP COLUMN old_worker_id,
     DROP COLUMN old_casual_labourer_id;
 
--- ── 8. Drop old tables ───────────────────────────────────────────────────────
+-- ── 9. Drop old tables (all referencing FKs already removed above) ───────────
 DROP TABLE workers;
 DROP TABLE casual_labourers;
