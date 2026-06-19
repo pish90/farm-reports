@@ -26,9 +26,9 @@ public class Farm extends AuditBase {
     private List<User> users = new ArrayList<>();
 
     @OneToMany(mappedBy = "farm", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Worker> workers = new ArrayList<>();
+    private List<Employee> employees = new ArrayList<>();
 
-    @OneToMany(mappedBy = "farm", cascade = CascadeType.ALL, orphanRemoval = true)
+@OneToMany(mappedBy = "farm", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<LivestockType> livestockTypes = new ArrayList<>();
 
     @OneToMany(mappedBy = "farm", cascade = CascadeType.ALL, orphanRemoval = true)

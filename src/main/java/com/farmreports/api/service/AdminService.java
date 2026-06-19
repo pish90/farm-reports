@@ -29,7 +29,7 @@ public class AdminService {
     private final ExpenseRepository expenseRepository;
     private final AttendanceRepository attendanceRepository;
     private final LivestockReturnRepository livestockReturnRepository;
-    private final WorkerRepository workerRepository;
+    private final EmployeeRepository employeeRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
 
@@ -69,7 +69,8 @@ public class AdminService {
 
             BigDecimal milk = milkRepository.sumLitresByFarmAndYearAndMonth(farm.getId(), year, month);
             BigDecimal expenses = expenseRepository.sumCostByFarmAndYearAndMonth(farm.getId(), year, month);
-            long activeWorkers = workerRepository.countByFarmIdAndActiveTrue(farm.getId());
+            long activeWorkers = employeeRepository.countByFarmIdAndStatusAndEmploymentType(
+                    farm.getId(), "ACTIVE", EmploymentType.SALARIED);
 
             return new FarmLiveStatusDto(
                     farm.getId(), farm.getName(), year, month,

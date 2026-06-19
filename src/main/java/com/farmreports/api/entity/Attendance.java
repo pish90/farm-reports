@@ -22,7 +22,7 @@ public class Attendance {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "worker_id", nullable = false)
-    private Worker worker;
+    private Employee employee;
 
     @Column(name = "day_of_month", nullable = false)
     private Integer dayOfMonth;

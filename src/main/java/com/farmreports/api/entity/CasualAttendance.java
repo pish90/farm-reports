@@ -24,7 +24,7 @@ public class CasualAttendance {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "casual_labourer_id", nullable = false)
-    private CasualLabourer casualLabourer;
+    private Employee employee;
 
     @Column(name = "day_of_month", nullable = false)
     private Integer dayOfMonth;

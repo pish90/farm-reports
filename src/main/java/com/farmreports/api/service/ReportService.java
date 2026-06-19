@@ -24,13 +24,12 @@ public class ReportService {
     private final LivestockReturnRepository livestockReturnRepository;
     private final MilkProductionRepository milkProductionRepository;
     private final ExpenseRepository expenseRepository;
-    private final WorkerRepository workerRepository;
+    private final EmployeeRepository employeeRepository;
     private final LivestockTypeRepository livestockTypeRepository;
     private final FarmRepository farmRepository;
     private final UserRepository userRepository;
     private final ExpenseCategoryRepository categoryRepository;
     private final BusinessUnitRepository businessUnitRepository;
-    private final CasualLabourerRepository casualLabourerRepository;
     private final CasualAttendanceRepository casualAttendanceRepository;
     private final JdbcTemplate jdbc;
 
@@ -75,12 +74,13 @@ public class ReportService {
         attendanceRepository.deleteByReportId(reportId);
 
         List<Attendance> records = uniqueEntries.stream().map(e -> {
-            Worker worker = workerRepository.findByIdAndFarmId(e.workerId(), farmId)
+            Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(
+                            e.workerId(), farmId, EmploymentType.SALARIED)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "Worker not found: " + e.workerId()));
             Attendance a = new Attendance();
             a.setReport(report);
-            a.setWorker(worker);
+            a.setEmployee(employee);
             a.setDayOfMonth(e.dayOfMonth());
             String status = e.status() != null ? e.status() : (Boolean.TRUE.equals(e.present()) ? "P" : "A");
             a.setStatus(status);
@@ -201,12 +201,13 @@ public class ReportService {
         casualAttendanceRepository.deleteByReportId(reportId);
 
         List<CasualAttendance> records = uniqueEntries.stream().map(e -> {
-            CasualLabourer labourer = casualLabourerRepository.findByIdAndFarmId(e.casualLabourerId(), farmId)
+            Employee labourer = employeeRepository.findByIdAndFarmIdAndEmploymentType(
+                            e.casualLabourerId(), farmId, EmploymentType.CASUAL)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "Casual labourer not found: " + e.casualLabourerId()));
             CasualAttendance ca = new CasualAttendance();
             ca.setReport(report);
-            ca.setCasualLabourer(labourer);
+            ca.setEmployee(labourer);
             ca.setDayOfMonth(e.dayOfMonth());
             String status = e.status() != null ? e.status() : (Boolean.TRUE.equals(e.present()) ? "P" : "A");
             ca.setStatus(status);
@@ -289,8 +290,8 @@ public class ReportService {
         List<AttendanceRecordDto> attendance = report.getAttendance().stream()
                 .map(a -> new AttendanceRecordDto(
                         a.getId(),
-                        a.getWorker().getId(),
-                        a.getWorker().getName(),
+                        a.getEmployee().getId(),
+                        a.getEmployee().getFullName(),
                         a.getDayOfMonth(),
                         a.isPresent(),
                         a.getStatus() != null ? a.getStatus() : (a.isPresent() ? "P" : "A"),
@@ -341,12 +342,12 @@ public class ReportService {
                 .map(ca -> {
                     BigDecimal effective = ca.getRateOverride() != null
                             ? ca.getRateOverride()
-                            : (ca.getCasualLabourer().getDefaultDailyRate() != null
-                                    ? ca.getCasualLabourer().getDefaultDailyRate() : BigDecimal.ZERO);
+                            : (ca.getEmployee().getDefaultDailyRate() != null
+                                    ? ca.getEmployee().getDefaultDailyRate() : BigDecimal.ZERO);
                     return new CasualAttendanceRecordDto(
                             ca.getId(),
-                            ca.getCasualLabourer().getId(),
-                            ca.getCasualLabourer().getName(),
+                            ca.getEmployee().getId(),
+                            ca.getEmployee().getFullName(),
                             ca.getDayOfMonth(),
                             ca.isPresent(),
                             ca.getStatus(),

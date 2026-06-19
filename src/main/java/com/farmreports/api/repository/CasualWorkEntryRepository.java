@@ -13,7 +13,7 @@ public interface CasualWorkEntryRepository extends JpaRepository<CasualWorkEntry
             SELECT COALESCE(SUM(COALESCE(e.rate_override, s.default_daily_rate)), 0)
             FROM casual_work_entries e
             JOIN casual_work_sessions s ON e.session_id = s.id
-            WHERE e.casual_labourer_id = :labourerId
+            WHERE e.casual_labourer_id = :employeeId
             """, nativeQuery = true)
-    BigDecimal sumEarnedByLabourerId(@Param("labourerId") Integer labourerId);
+    BigDecimal sumEarnedByEmployeeId(@Param("employeeId") Integer employeeId);
 }

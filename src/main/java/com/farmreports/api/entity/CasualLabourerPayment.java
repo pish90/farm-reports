@@ -22,7 +22,7 @@ public class CasualLabourerPayment {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "casual_labourer_id", nullable = false)
-    private CasualLabourer casualLabourer;
+    private Employee employee;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "farm_id", nullable = false)

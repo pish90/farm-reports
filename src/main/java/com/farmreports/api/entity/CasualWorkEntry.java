@@ -24,7 +24,7 @@ public class CasualWorkEntry {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "casual_labourer_id", nullable = false)
-    private CasualLabourer casualLabourer;
+    private Employee employee;
 
     @Column(name = "rate_override")
     private BigDecimal rateOverride;

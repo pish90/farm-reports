@@ -20,9 +20,12 @@ public enum AuditAction {
     ATTENDANCE_NOTES_UPDATED,
     LIVESTOCK_NOTES_UPDATED,
 
-    // Workers
+    // Workers / Employees
     WORKER_ADDED,
+    WORKER_UPDATED,
     WORKER_DEACTIVATED,
+    DEPARTMENT_ADDED,
+    DEPARTMENT_DELETED,
 
     // Casual labourers
     CASUAL_LABOURER_ADDED,
