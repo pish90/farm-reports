@@ -17,6 +17,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -114,5 +115,32 @@ public class AdminService {
                 null, null, null, null, null
             ))
             .toList();
+    }
+
+    public String buildAttendanceCsv() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("farm,year,month,report_status,employee_id,worker_name,day_of_month,present,status\n");
+        attendanceRepository.findAll().forEach(a -> {
+            MonthlyReport r  = a.getReport();
+            Employee      e  = a.getEmployee();
+            sb.append(escapeCsv(r.getFarm().getName())).append(',')
+              .append(r.getYear()).append(',')
+              .append(r.getMonth()).append(',')
+              .append(r.getStatus().name()).append(',')
+              .append(escapeCsv(e.getEmployeeId())).append(',')
+              .append(escapeCsv(e.getFullName())).append(',')
+              .append(a.getDayOfMonth()).append(',')
+              .append(a.isPresent()).append(',')
+              .append(a.getStatus() != null ? a.getStatus() : (a.isPresent() ? "P" : "A"))
+              .append('\n');
+        });
+        return sb.toString();
+    }
+
+    private static String escapeCsv(String value) {
+        if (value == null) return "";
+        if (value.contains(",") || value.contains("\"") || value.contains("\n"))
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        return value;
     }
 }

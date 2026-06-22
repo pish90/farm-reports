@@ -294,4 +294,18 @@ public class AdminController {
     private boolean isOpsManager(Authentication auth) {
         return "OPERATIONS_MANAGER".equals(ClaimsHelper.getRole(auth));
     }
+
+    // ── Attendance backup (CSV) ────────────────────────────────────────────────
+
+    @GetMapping("/backup/attendance")
+    public ResponseEntity<byte[]> downloadAttendanceBackup(Authentication auth) {
+        requireAdmin(auth);
+        String csv = adminService.buildAttendanceCsv();
+        byte[] bytes = csv.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"attendance_backup.csv\"")
+                .contentType(MediaType.parseMediaType("text/csv"))
+                .body(bytes);
+    }
 }
