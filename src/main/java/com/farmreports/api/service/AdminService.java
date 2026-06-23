@@ -33,6 +33,7 @@ public class AdminService {
     private final EmployeeRepository employeeRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final DataBackupRepository dataBackupRepository;
 
     public List<FarmSummaryDto> getAllFarmSummaries() {
         int year = LocalDate.now().getYear();
@@ -135,6 +136,20 @@ public class AdminService {
               .append('\n');
         });
         return sb.toString();
+    }
+
+    @Transactional
+    public DataBackup createBackup(String backupType, String createdBy) {
+        String csv = buildAttendanceCsv();
+        long rows = csv.lines().count() - 1; // subtract header
+
+        DataBackup backup = new DataBackup();
+        backup.setBackupType(backupType);
+        backup.setCreatedAt(LocalDateTime.now());
+        backup.setCreatedBy(createdBy);
+        backup.setRowCount((int) rows);
+        backup.setDataCsv(csv);
+        return dataBackupRepository.save(backup);
     }
 
     private static String escapeCsv(String value) {

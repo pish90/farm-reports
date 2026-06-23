@@ -36,5 +36,6 @@ public enum AuditAction {
     CASUAL_PAYMENT_DELETED,
 
     // Admin
-    EXCEL_EXPORTED
+    EXCEL_EXPORTED,
+    BACKUP_CREATED
 }

@@ -308,4 +308,19 @@ public class AdminController {
                 .contentType(MediaType.parseMediaType("text/csv"))
                 .body(bytes);
     }
+
+    @PostMapping("/backup")
+    public ResponseEntity<byte[]> createBackup(Authentication auth) {
+        requireAdmin(auth);
+        var backup = adminService.createBackup("MANUAL", ClaimsHelper.getUserName(auth));
+        auditService.log(AuditAction.BACKUP_CREATED, auth, null, null,
+                "DataBackup", String.valueOf(backup.getId()),
+                "Manual attendance backup — " + backup.getRowCount() + " rows");
+        byte[] bytes = backup.getDataCsv().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String filename = "attendance-backup-" + backup.getCreatedAt().toLocalDate() + ".csv";
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(MediaType.parseMediaType("text/csv"))
+                .body(bytes);
+    }
 }
