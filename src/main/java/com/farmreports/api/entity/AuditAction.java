@@ -19,6 +19,7 @@ public enum AuditAction {
     EXPENSES_UPDATED,
     ATTENDANCE_NOTES_UPDATED,
     LIVESTOCK_NOTES_UPDATED,
+    PAYROLL_UPDATED,
 
     // Workers / Employees
     WORKER_ADDED,
