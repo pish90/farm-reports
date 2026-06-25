@@ -75,6 +75,16 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 - **CasualLabourer** — seasonal worker. Casual work tracked via the work-session model (see below).
 - **CasualWorkSession** — a date + activity + default daily rate for a farm. Multiple labourers attach to a session via `CasualWorkEntry` (with optional per-entry `rate_override`). This replaced the old `casual_attendance` table (V24 migration); the old table is kept for historical data only.
 - **Expense** — has optional `ExpenseCategory` (account code) and `BusinessUnit`, plus a list of `ExpenseApportionment` rows for cost splitting.
+- **PayrollEntry** — one row per (farm, year, month, employee). Flat entity — stores `farmId` and `employeeId` as plain integers (no `@ManyToOne`). Fields: `salaryRate`, `daysWorked`, `grossSalary`, `loans`, `amountPaid`, `amountRemaining`, `notes`, `updatedAt`. UNIQUE on `(farm_id, year, month, employee_id)`.
+  - `GET /reports/payroll?farmId&year&month` — returns entries for that period, seeding from previous month if none exist (copies salary_rate/loans, recalculates daysWorked from attendance P/WA statuses, falls back to all ACTIVE SALARIED employees if no prior month data either).
+  - `PUT /reports/payroll?farmId&year&month` — upsert (delete-then-reinsert). Audit: `PAYROLL_UPDATED`.
+  - `GET /reports/payroll/summary?farmId&year` — queries `summary_payroll` view.
+  - Visible in mobile only to MANAGER and ADMIN roles. Admin sees a farm-picker chip bar (loaded via `getFarmLiveStatus`) since admin has no farmId in JWT.
+
+### Annual Summary Views (V32)
+- `summary_payroll` — `SUM(gross/loans/paid/remaining)` grouped by `farm_id, year, month` — queried by `GET /reports/payroll/summary`.
+- `summary_milk_prod` — `SUM(litres)` grouped by `farm_id, year, month` — queried by `GET /reports/summary/milk?farmId&year`.
+- `summary_livestock` — `SUM(count)` grouped by `farm_id, year, month, category, type` — queried by `GET /reports/summary/livestock?farmId&year`.
 
 ## Environment Variables
 
@@ -92,3 +102,14 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 - Seed data is in `V2__seed.sql` (farms, users, livestock types). Workers and reports are created via the API.
 - The confirmed valid BCrypt hash for the default password `"changeme"` is `$2a$10$RlfO3Cgv2ulVh2B3gMcxGOz.hNiSyZfxJTz92b50IlSlYz8CSLlXe`. Use `HashGen.java` to generate hashes for new seed migrations.
 - When adding new livestock categories, add them to the `LivestockCategory` enum AND insert the new `livestock_types` rows via a new migration.
+
+### Migration history (latest first)
+| Version | Description |
+|---|---|
+| V33 | Payroll seed data — Jan–May 2026 for all 5 farms (360 rows), extracted from Excel backups. Idempotent via ON CONFLICT DO UPDATE. Names matched via `UPPER(first_name)` on `employees` table. |
+| V32 | Annual summary views: `summary_payroll`, `summary_milk_prod`, `summary_livestock` |
+| V31 | `payroll_entries` table + `summary_payroll` view |
+| V30 | (previous — check file for details) |
+| V29 | Employee unification — merged `workers` into `employees` table; full name stored in `first_name` column (single field, no last_name for migrated workers) |
+
+**Next migration must be V34.**
