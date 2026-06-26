@@ -18,6 +18,13 @@ public class EmployeeIdService {
         return String.format("%s%04d", prefix, seq != null ? seq : 1);
     }
 
+    public String generateLsNumber() {
+        Integer seq = jdbc.queryForObject(
+                "UPDATE employee_id_sequences SET last_number = last_number + 1 WHERE prefix = 'LS' RETURNING last_number",
+                Integer.class);
+        return "LS" + (seq != null ? seq : 2001);
+    }
+
     private static String prefixFor(String farmName) {
         return switch (farmName) {
             case "Les A", "Les B" -> "LES";

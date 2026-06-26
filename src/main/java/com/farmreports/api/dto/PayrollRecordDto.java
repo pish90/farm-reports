@@ -7,6 +7,7 @@ public record PayrollRecordDto(
         Integer employeeId,
         String employeeName,
         String employeeCode,
+        String lsNumber,
         BigDecimal salaryRate,
         Integer daysWorked,
         BigDecimal grossSalary,

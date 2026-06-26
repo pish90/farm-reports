@@ -55,7 +55,8 @@ public class PayrollService {
                 e.setLoans(prev.getLoans());
                 e.setDaysWorked(daysWorked);
                 e.setAmountPaid(BigDecimal.ZERO);
-                e.setAmountRemaining(null);
+                // Carry forward any outstanding balance from the prior month
+                e.setAmountRemaining(prev.getAmountRemaining());
                 e.setNotes(null);
                 e.setUpdatedAt(LocalDateTime.now());
                 return e;
@@ -147,11 +148,13 @@ public class PayrollService {
         Employee emp = employeeRepo.findById(e.getEmployeeId()).orElse(null);
         String name = emp != null ? emp.getFullName() : "Unknown";
         String code = emp != null ? emp.getEmployeeId() : null;
+        String lsNumber = emp != null ? emp.getLsNumber() : null;
         return new PayrollRecordDto(
                 e.getId(),
                 e.getEmployeeId(),
                 name,
                 code,
+                lsNumber,
                 e.getSalaryRate(),
                 e.getDaysWorked(),
                 e.getGrossSalary(),

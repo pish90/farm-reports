@@ -48,6 +48,7 @@ public class FarmService {
         Employee employee = new Employee();
         employee.setFarm(farm);
         employee.setEmployeeId(employeeIdService.generateFor(farm.getName()));
+        employee.setLsNumber(employeeIdService.generateLsNumber());
         employee.setFirstName(firstName);
         employee.setLastName(resolveLastName(request.firstName(), request.lastName(), request.name()));
         employee.setPhone(request.phone() != null ? request.phone().trim() : null);
@@ -136,6 +137,7 @@ public class FarmService {
     WorkerDto toWorkerDto(Employee e) {
         return new WorkerDto(
                 e.getId(),
+                e.getLsNumber(),
                 e.getEmployeeId(),
                 e.getFirstName(),
                 e.getLastName(),

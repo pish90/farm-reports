@@ -106,10 +106,11 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 ### Migration history (latest first)
 | Version | Description |
 |---|---|
+| V34 | Employee profile — adds `ls_number` (global unique, starts LS2001), `date_of_birth`, `national_id` to `employees`; backfills LS numbers for all existing employees in ID order; creates `employee_payments` table for salaried staff payments. |
 | V33 | Payroll seed data — Jan–May 2026 for all 5 farms (360 rows), extracted from Excel backups. Idempotent via ON CONFLICT DO UPDATE. Names matched via `UPPER(first_name)` on `employees` table. |
 | V32 | Annual summary views: `summary_payroll`, `summary_milk_prod`, `summary_livestock` |
 | V31 | `payroll_entries` table + `summary_payroll` view |
 | V30 | (previous — check file for details) |
 | V29 | Employee unification — merged `workers` into `employees` table; full name stored in `first_name` column (single field, no last_name for migrated workers) |
 
-**Next migration must be V34.**
+**Next migration must be V35.**

@@ -8,6 +8,7 @@ import lombok.Setter;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.Period;
 
 @Entity
 @Table(name = "employees")
@@ -62,6 +63,15 @@ public class Employee {
     @Column(name = "default_daily_rate")
     private BigDecimal defaultDailyRate;
 
+    @Column(name = "ls_number", nullable = false, unique = true, length = 10)
+    private String lsNumber;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
+
+    @Column(name = "national_id", length = 50)
+    private String nationalId;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
@@ -72,5 +82,10 @@ public class Employee {
 
     public boolean isActive() {
         return "ACTIVE".equals(status);
+    }
+
+    public Integer getAge() {
+        if (dateOfBirth == null) return null;
+        return Period.between(dateOfBirth, LocalDate.now()).getYears();
     }
 }
