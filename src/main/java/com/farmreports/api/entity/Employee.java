@@ -72,6 +72,9 @@ public class Employee {
     @Column(name = "national_id", length = 50)
     private String nationalId;
 
+    @Column(name = "gender", length = 10)
+    private String gender;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 

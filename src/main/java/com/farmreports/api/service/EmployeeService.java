@@ -69,6 +69,7 @@ public class EmployeeService {
         emp.setEmploymentType(type);
         emp.setJobTitle(request.jobTitle() != null && !request.jobTitle().isBlank() ? request.jobTitle().trim() : null);
         emp.setNationalId(request.nationalId() != null && !request.nationalId().isBlank() ? request.nationalId().trim() : null);
+        emp.setGender(request.gender() != null && !request.gender().isBlank() ? request.gender().trim() : null);
         emp.setStartDate(parseDate(request.startDate()));
         emp.setDateOfBirth(parseDate(request.dateOfBirth()));
         emp.setDefaultDailyRate(request.defaultDailyRate());
@@ -93,6 +94,7 @@ public class EmployeeService {
         emp.setPhone(request.phone() != null && !request.phone().isBlank() ? request.phone().trim() : null);
         emp.setJobTitle(request.jobTitle() != null && !request.jobTitle().isBlank() ? request.jobTitle().trim() : null);
         emp.setNationalId(request.nationalId() != null && !request.nationalId().isBlank() ? request.nationalId().trim() : null);
+        emp.setGender(request.gender() != null && !request.gender().isBlank() ? request.gender().trim() : null);
         emp.setStartDate(parseDate(request.startDate()));
         emp.setDateOfBirth(parseDate(request.dateOfBirth()));
         emp.setDefaultDailyRate(request.defaultDailyRate());
@@ -218,6 +220,7 @@ public class EmployeeService {
                 e.getStartDate() != null ? e.getStartDate().toString() : null,
                 e.getDateOfBirth() != null ? e.getDateOfBirth().toString() : null,
                 e.getNationalId(),
+                e.getGender(),
                 e.getAge(),
                 e.getStatus(),
                 e.getDefaultDailyRate(),

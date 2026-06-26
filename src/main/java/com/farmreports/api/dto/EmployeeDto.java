@@ -19,6 +19,7 @@ public record EmployeeDto(
         String startDate,
         String dateOfBirth,
         String nationalId,
+        String gender,
         Integer age,
         String status,
         BigDecimal defaultDailyRate,

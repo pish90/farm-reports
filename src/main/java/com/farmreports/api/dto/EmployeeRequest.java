@@ -16,6 +16,7 @@ public record EmployeeRequest(
         String startDate,
         String dateOfBirth,
         @Size(max = 50) String nationalId,
+        @Size(max = 10) String gender,
         BigDecimal defaultDailyRate,
         String photoBase64,
         String photoMimeType,
