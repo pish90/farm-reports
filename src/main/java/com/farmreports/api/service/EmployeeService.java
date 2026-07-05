@@ -52,6 +52,13 @@ public class EmployeeService {
         return toDto(emp);
     }
 
+    /** ADMIN-only master registry: every employee across every farm. */
+    @Transactional(readOnly = true)
+    public List<EmployeeDto> getAllEmployeesAcrossFarms() {
+        return employeeRepo.findAllOrderByFarmAndName()
+                .stream().map(this::toDto).toList();
+    }
+
     @Transactional
     public EmployeeDto createEmployee(Integer farmId, EmployeeRequest request) {
         Farm farm = farmRepo.findById(farmId)
@@ -62,7 +69,7 @@ public class EmployeeService {
         Employee emp = new Employee();
         emp.setFarm(farm);
         emp.setEmployeeId(employeeIdService.generateFor(farm.getName()));
-        emp.setLsNumber(employeeIdService.generateLsNumber());
+        emp.setLsNumber(employeeIdService.generateLsNumber(farm.getName()));
         emp.setFirstName(request.firstName().trim());
         emp.setLastName(request.lastName() != null && !request.lastName().isBlank() ? request.lastName().trim() : null);
         emp.setPhone(request.phone() != null && !request.phone().isBlank() ? request.phone().trim() : null);
@@ -208,6 +215,8 @@ public class EmployeeService {
         }
         return new EmployeeDto(
                 e.getId(),
+                e.getFarm().getId(),
+                e.getFarm().getName(),
                 e.getLsNumber(),
                 e.getEmployeeId(),
                 e.getFirstName(),

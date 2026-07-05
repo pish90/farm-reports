@@ -6,6 +6,7 @@ import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.security.ClaimsHelper;
 import com.farmreports.api.service.AdminService;
 import com.farmreports.api.service.AuditService;
+import com.farmreports.api.service.EmployeeService;
 import com.farmreports.api.service.ExportService;
 import com.farmreports.api.service.ReportService;
 import jakarta.validation.Valid;
@@ -31,6 +32,7 @@ public class AdminController {
     private final ReportService reportService;
     private final ExportService exportService;
     private final AuditService auditService;
+    private final EmployeeService employeeService;
 
     // ── Dashboard / overview ───────────────────────────────────────────────────
 
@@ -49,6 +51,14 @@ public class AdminController {
         int y = year  != null ? year  : java.time.LocalDate.now().getYear();
         int m = month != null ? month : java.time.LocalDate.now().getMonthValue();
         return ApiResponse.ok(adminService.getFarmLiveStatus(y, m));
+    }
+
+    // ── Master employee registry (all farms) ───────────────────────────────────
+
+    @GetMapping("/employees")
+    public ApiResponse<List<EmployeeDto>> getMasterEmployeeRegistry(Authentication auth) {
+        requireAdmin(auth);
+        return ApiResponse.ok(employeeService.getAllEmployeesAcrossFarms());
     }
 
     @PutMapping("/users/reset-password")

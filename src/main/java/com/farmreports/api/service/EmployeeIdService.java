@@ -18,11 +18,11 @@ public class EmployeeIdService {
         return String.format("%s%04d", prefix, seq != null ? seq : 1);
     }
 
-    public String generateLsNumber() {
+    public String generateLsNumber(String farmName) {
         Integer seq = jdbc.queryForObject(
                 "UPDATE employee_id_sequences SET last_number = last_number + 1 WHERE prefix = 'LS' RETURNING last_number",
                 Integer.class);
-        return "LS" + (seq != null ? seq : 2001);
+        return "LS" + (seq != null ? seq : 2001) + letterFor(farmName);
     }
 
     private static String prefixFor(String farmName) {
@@ -32,6 +32,18 @@ public class EmployeeIdService {
             case "Matunda"        -> "MAT";
             case "Siyoi"          -> "SIY";
             default               -> "EMP";
+        };
+    }
+
+    /** Single-letter farm tag appended to LS numbers, e.g. LS2001K for Kenlet. */
+    public static String letterFor(String farmName) {
+        return switch (farmName) {
+            case "Les A"  -> "A";
+            case "Les B"  -> "B";
+            case "Kenlet" -> "K";
+            case "Siyoi"  -> "S";
+            case "Matunda"-> "M";
+            default       -> "";
         };
     }
 }

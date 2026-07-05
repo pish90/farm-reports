@@ -48,7 +48,7 @@ public class FarmService {
         Employee employee = new Employee();
         employee.setFarm(farm);
         employee.setEmployeeId(employeeIdService.generateFor(farm.getName()));
-        employee.setLsNumber(employeeIdService.generateLsNumber());
+        employee.setLsNumber(employeeIdService.generateLsNumber(farm.getName()));
         employee.setFirstName(firstName);
         employee.setLastName(resolveLastName(request.firstName(), request.lastName(), request.name()));
         employee.setPhone(request.phone() != null ? request.phone().trim() : null);

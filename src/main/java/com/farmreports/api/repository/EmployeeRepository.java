@@ -23,6 +23,9 @@ public interface EmployeeRepository extends JpaRepository<Employee, Integer> {
            "ORDER BY e.firstName, e.lastName")
     List<Employee> searchByFarmId(Integer farmId, String q);
 
+    @Query("SELECT e FROM Employee e ORDER BY e.farm.name, e.firstName, e.lastName")
+    List<Employee> findAllOrderByFarmAndName();
+
     Optional<Employee> findByIdAndFarmId(Integer id, Integer farmId);
 
     Optional<Employee> findByIdAndFarmIdAndEmploymentType(Integer id, Integer farmId, EmploymentType type);

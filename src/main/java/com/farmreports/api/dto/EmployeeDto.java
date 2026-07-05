@@ -7,6 +7,8 @@ import java.math.BigDecimal;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record EmployeeDto(
         Integer id,
+        Integer farmId,
+        String farmName,
         String lsNumber,
         String employeeId,
         String firstName,
