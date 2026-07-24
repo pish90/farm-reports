@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Farm Reports — Admin Console</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="login-screen" class="login-screen">
+  <form id="login-form" class="login-card">
+    <h1>Farm Reports</h1>
+    <p class="subtitle">Admin Console</p>
+    <label>Email
+      <input type="email" id="login-email" required autocomplete="username">
+    </label>
+    <label>Password
+      <input type="password" id="login-password" required autocomplete="current-password">
+    </label>
+    <div id="login-error" class="error-text" hidden></div>
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+
+<div id="change-password-screen" class="login-screen" hidden>
+  <form id="change-password-form" class="login-card">
+    <h1>Set a new password</h1>
+    <p class="subtitle">Your account requires a password change before continuing.</p>
+    <label>Current password
+      <input type="password" id="cp-current" required autocomplete="current-password">
+    </label>
+    <label>New password
+      <input type="password" id="cp-new" required autocomplete="new-password">
+    </label>
+    <p class="hint">At least 8 characters, with uppercase, lowercase, a number, and a symbol (@$!%*?&amp;._#^).</p>
+    <div id="change-password-error" class="error-text" hidden></div>
+    <button type="submit">Update password</button>
+  </form>
+</div>
+
+<div id="app-shell" class="app-shell" hidden>
+  <aside class="sidebar">
+    <div class="brand">Farm Reports</div>
+    <nav id="nav-links" class="nav-links"></nav>
+    <div class="sidebar-footer">
+      <div id="session-user" class="session-user"></div>
+      <button id="logout-btn" class="link-btn">Sign out</button>
+    </div>
+  </aside>
+  <main class="main">
+    <div id="toast" class="toast" hidden></div>
+    <div id="view-container" class="view-container"></div>
+  </main>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
