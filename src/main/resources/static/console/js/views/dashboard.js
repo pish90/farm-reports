@@ -1,4 +1,5 @@
 import { api } from '../api.js';
+import { isAdmin, getSession } from '../auth.js';
 import { formatMoney, formatDateTime, monthName, escapeHtml } from '../util.js';
 import { navigate } from '../router.js';
 
@@ -18,21 +19,48 @@ export async function render(container) {
     <div class="card"><div class="empty-state">Loading farms…</div></div>
   `;
 
-  const [summaries, liveStatus] = await Promise.all([
+  const session = getSession();
+  const employeesRequest = isAdmin()
+    ? api.get('/admin/employees')
+    : session.farmId ? api.get(`/farms/${session.farmId}/employees`) : Promise.resolve([]);
+
+  const [summaries, liveStatus, employees] = await Promise.all([
     api.get('/admin/farms'),
     api.get(`/admin/live-status?year=${year}&month=${month}`),
+    employeesRequest,
   ]);
 
-  const tiles = summaries.map((s) => `
+  const employeesByFarm = new Map();
+  for (const e of employees) {
+    const bucket = employeesByFarm.get(e.farmId) || { total: 0, active: 0 };
+    bucket.total++;
+    if (e.status === 'ACTIVE') bucket.active++;
+    employeesByFarm.set(e.farmId, bucket);
+  }
+  const totalActive = employees.filter((e) => e.status === 'ACTIVE').length;
+
+  const employeeWidget = `
+    <div class="stat-tile">
+      <div class="label">Employees</div>
+      <div class="value">${totalActive}</div>
+      <div class="text-dim">active of ${employees.length} total</div>
+    </div>
+  `;
+
+  const tiles = summaries.map((s) => {
+    const empCount = employeesByFarm.get(s.farmId);
+    return `
     <div class="stat-tile">
       <div class="label">${escapeHtml(s.farmName)}</div>
       <div class="value">${s.reportsThisYear}</div>
       <div class="text-dim">reports in ${year}</div>
-      <div class="text-dim" style="margin-top:.5rem">Milk this month: <strong>${formatMoney(s.totalMilkThisMonth)}</strong> L</div>
+      ${empCount ? `<div class="text-dim" style="margin-top:.5rem">Employees: <strong>${empCount.active}</strong> active of ${empCount.total}</div>` : ''}
+      <div class="text-dim">Milk this month: <strong>${formatMoney(s.totalMilkThisMonth)}</strong> L</div>
       <div class="text-dim">Expenses this month: <strong>KES ${formatMoney(s.totalExpensesThisMonth)}</strong></div>
       <div class="text-dim">Last submitted: ${formatDateTime(s.lastSubmittedAt)}</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   const rows = liveStatus.map((f) => `
     <tr>
@@ -50,7 +78,7 @@ export async function render(container) {
 
   container.innerHTML = `
     <h2>Dashboard</h2>
-    <div class="stat-grid">${tiles}</div>
+    <div class="stat-grid">${employeeWidget}${tiles}</div>
     <div class="card">
       <div class="section-title">
         <h3 style="margin:0">Live status — ${monthName(month)} ${year}</h3>
