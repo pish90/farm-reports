@@ -50,6 +50,23 @@ public class PayrollController {
         return ApiResponse.ok();
     }
 
+    @PutMapping("/{employeeId}")
+    public ApiResponse<PayrollRecordDto> upsertSingleEntry(
+            @RequestParam Integer farmId,
+            @RequestParam Integer year,
+            @RequestParam Integer month,
+            @PathVariable Integer employeeId,
+            @RequestBody PayrollEntryRequest entry,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        PayrollRecordDto dto = payrollService.upsertSingleEntry(farmId, year, month, employeeId, entry);
+        auditService.log(AuditAction.PAYROLL_UPDATED, auth,
+                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
+                "PayrollEntry", farmId + "-" + year + "-" + month + "-" + employeeId,
+                "Payroll entry updated for " + dto.employeeName() + " (" + year + "-" + String.format("%02d", month) + ")");
+        return ApiResponse.ok(dto);
+    }
+
     @GetMapping("/summary")
     public ApiResponse<List<PayrollSummaryDto>> getAnnualPayrollSummary(
             @RequestParam Integer farmId,

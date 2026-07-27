@@ -114,6 +114,29 @@ public class PayrollService {
         payrollRepo.saveAll(toSave);
     }
 
+    @Transactional
+    public PayrollRecordDto upsertSingleEntry(Integer farmId, Integer year, Integer month, Integer employeeId, PayrollEntryRequest req) {
+        employeeRepo.findByIdAndFarmId(employeeId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Employee not found: " + employeeId));
+
+        PayrollEntry e = payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(farmId, year, month, employeeId)
+                .orElseGet(PayrollEntry::new);
+        e.setFarmId(farmId);
+        e.setYear(year);
+        e.setMonth(month);
+        e.setEmployeeId(employeeId);
+        e.setSalaryRate(req.salaryRate());
+        e.setDaysWorked(req.daysWorked());
+        e.setGrossSalary(req.grossSalary());
+        e.setLoans(req.loans());
+        e.setAmountPaid(req.amountPaid());
+        e.setAmountRemaining(req.amountRemaining());
+        e.setNotes(req.notes());
+        e.setUpdatedAt(LocalDateTime.now());
+
+        return toDto(payrollRepo.save(e));
+    }
+
     @Transactional(readOnly = true)
     public List<PayrollSummaryDto> getAnnualPayrollSummary(Integer farmId, Integer year) {
         return jdbc.query(
