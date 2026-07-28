@@ -103,7 +103,16 @@ document.getElementById('change-password-form').addEventListener('submit', async
   const currentPassword = document.getElementById('cp-current').value;
   const newPassword = document.getElementById('cp-new').value;
   try {
-    const auth = await api.put('/auth/password', { currentPassword, newPassword });
+    const res = await fetch('/api/auth/password', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getSession().token}`,
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    const auth = await res.json();
+    if (!res.ok) throw new Error(auth.message || 'Could not update password');
     setToken(auth.token);
     showToast('Password updated', 'success');
     enterApp();

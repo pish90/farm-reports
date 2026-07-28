@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,6 +17,12 @@ public interface PayrollEntryRepository extends JpaRepository<PayrollEntry, Inte
     List<PayrollEntry> findByFarmIdAndYearAndMonthOrderByEmployeeId(Integer farmId, Integer year, Integer month);
 
     Optional<PayrollEntry> findByFarmIdAndYearAndMonthAndEmployeeId(Integer farmId, Integer year, Integer month, Integer employeeId);
+
+    List<PayrollEntry> findByFarmIdAndEmployeeIdAndYear(Integer farmId, Integer employeeId, Integer year);
+
+    @Query("SELECT COALESCE(SUM(p.grossSalary), 0) FROM PayrollEntry p " +
+           "WHERE p.farmId = :farmId AND p.employeeId = :employeeId AND p.year < :year")
+    BigDecimal sumGrossSalaryBeforeYear(@Param("farmId") Integer farmId, @Param("employeeId") Integer employeeId, @Param("year") Integer year);
 
     @Modifying(clearAutomatically = true)
     @Query("DELETE FROM PayrollEntry p WHERE p.farmId = :farmId AND p.year = :year AND p.month = :month")

@@ -12,8 +12,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +24,7 @@ public class EmployeeService {
 
     private final EmployeeRepository employeeRepo;
     private final EmployeePaymentRepository paymentRepo;
+    private final PayrollEntryRepository payrollRepo;
     private final DepartmentRepository departmentRepo;
     private final FarmRepository farmRepo;
     private final EmployeeIdService employeeIdService;
@@ -151,6 +155,37 @@ public class EmployeeService {
                 outstanding,
                 payments
         );
+    }
+
+    @Transactional(readOnly = true)
+    public EmployeeLedgerDto getEmployeeLedger(Integer farmId, Integer employeeId, Integer year) {
+        findOrThrow(farmId, employeeId);
+
+        BigDecimal openingBalance = payrollRepo.sumGrossSalaryBeforeYear(farmId, employeeId, year)
+                .subtract(paymentRepo.sumAmountBeforeDate(employeeId, farmId, LocalDate.of(year, 1, 1)));
+
+        Map<Integer, BigDecimal> earnedByMonth = payrollRepo.findByFarmIdAndEmployeeIdAndYear(farmId, employeeId, year).stream()
+                .collect(Collectors.toMap(PayrollEntry::getMonth,
+                        e -> e.getGrossSalary() != null ? e.getGrossSalary() : BigDecimal.ZERO, BigDecimal::add));
+        Map<Integer, BigDecimal> paidByMonth = paymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(
+                        employeeId, farmId, LocalDate.of(year, 1, 1), LocalDate.of(year, 12, 31)).stream()
+                .collect(Collectors.groupingBy(p -> p.getPaymentDate().getMonthValue(),
+                        Collectors.reducing(BigDecimal.ZERO, EmployeePayment::getAmount, BigDecimal::add)));
+
+        List<EmployeeLedgerMonthDto> months = new ArrayList<>();
+        BigDecimal running = openingBalance;
+        BigDecimal totalEarned = BigDecimal.ZERO;
+        BigDecimal totalPaid = BigDecimal.ZERO;
+        for (int m = 1; m <= 12; m++) {
+            BigDecimal earned = earnedByMonth.getOrDefault(m, BigDecimal.ZERO);
+            BigDecimal paid = paidByMonth.getOrDefault(m, BigDecimal.ZERO);
+            running = running.add(earned).subtract(paid);
+            totalEarned = totalEarned.add(earned);
+            totalPaid = totalPaid.add(paid);
+            months.add(new EmployeeLedgerMonthDto(m, earned, paid, running));
+        }
+
+        return new EmployeeLedgerDto(year, openingBalance, totalEarned, totalPaid, running, months);
     }
 
     @Transactional

@@ -84,6 +84,16 @@ public class EmployeeController {
         return ApiResponse.ok(employeeService.getSummary(farmId, id));
     }
 
+    @GetMapping("/{id}/ledger")
+    public ApiResponse<EmployeeLedgerDto> getLedger(
+            @PathVariable Integer farmId,
+            @PathVariable Integer id,
+            @RequestParam Integer year,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        return ApiResponse.ok(employeeService.getEmployeeLedger(farmId, id, year));
+    }
+
     @PostMapping("/{id}/payments")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<EmployeePaymentDto> recordPayment(

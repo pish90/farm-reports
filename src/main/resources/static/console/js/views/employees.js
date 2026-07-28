@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { getSession, isAdmin, canSeeAllFarms } from '../auth.js';
-import { formatMoney, formatDate, escapeHtml, debounce, openModal, showToast } from '../util.js';
+import { formatMoney, formatDate, escapeHtml, debounce, openModal, showToast, monthName } from '../util.js';
 
 let allEmployees = [];
 let farmFilter = '';
@@ -113,8 +113,13 @@ async function openEmployeeModal(employee, forcedFarmId) {
   ).join('');
 
   let summary = null;
+  let ledger = null;
+  const ledgerYear = new Date().getFullYear();
   if (!isNew) {
     summary = await api.get(`/farms/${farmId}/employees/${employee.id}/summary`).catch(() => null);
+    if (employee.employmentType === 'SALARIED') {
+      ledger = await api.get(`/farms/${farmId}/employees/${employee.id}/ledger?year=${ledgerYear}`).catch(() => null);
+    }
   }
 
   const { modal, close } = openModal(`
@@ -156,6 +161,7 @@ async function openEmployeeModal(employee, forcedFarmId) {
         <button type="submit">${isNew ? 'Create' : 'Save changes'}</button>
       </div>
     </form>
+    ${ledger ? renderLedgerSection(ledger) : ''}
     ${summary ? renderSummarySection(summary) : ''}
   `);
 
@@ -193,6 +199,54 @@ async function openEmployeeModal(employee, forcedFarmId) {
   });
 
   if (summary) wireSummarySection(modal, farmId, employee.id, summary);
+  if (ledger) wireLedgerSection(modal, farmId, employee.id);
+}
+
+function renderLedgerSection(ledger) {
+  const now = new Date();
+  const yearOptions = Array.from({ length: 6 }, (_, i) => now.getFullYear() - i)
+    .map((y) => `<option value="${y}" ${y === ledger.year ? 'selected' : ''}>${y}</option>`).join('');
+  return `
+    <div class="section-title" style="margin-top:1.5rem">
+      <h4 style="margin:0">Annual Ledger</h4>
+      <select id="ledger-year">${yearOptions}</select>
+    </div>
+    <div id="ledger-content">${renderLedgerContent(ledger)}</div>
+  `;
+}
+
+function renderLedgerContent(ledger) {
+  return `
+    <div class="stat-grid">
+      <div class="stat-tile"><div class="label">Opening balance</div><div class="value">${formatMoney(ledger.openingBalance)}</div></div>
+      <div class="stat-tile"><div class="label">Earned this year</div><div class="value">${formatMoney(ledger.totalEarned)}</div></div>
+      <div class="stat-tile"><div class="label">Paid this year</div><div class="value">${formatMoney(ledger.totalPaid)}</div></div>
+      <div class="stat-tile"><div class="label">Closing balance</div><div class="value">${formatMoney(ledger.closingBalance)}</div></div>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Month</th><th>Earned</th><th>Paid</th><th>Balance</th></tr></thead>
+        <tbody>${ledger.months.map((m) => `
+          <tr>
+            <td>${monthName(m.month)}</td>
+            <td>${formatMoney(m.earned)}</td>
+            <td>${formatMoney(m.paid)}</td>
+            <td>${formatMoney(m.balance)}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function wireLedgerSection(modal, farmId, employeeId) {
+  modal.querySelector('#ledger-year').addEventListener('change', async (e) => {
+    const year = Number(e.target.value);
+    const content = modal.querySelector('#ledger-content');
+    content.innerHTML = `<div class="empty-state">Loading…</div>`;
+    const newLedger = await api.get(`/farms/${farmId}/employees/${employeeId}/ledger?year=${year}`).catch(() => null);
+    content.innerHTML = newLedger ? renderLedgerContent(newLedger) : '<div class="empty-state">Failed to load ledger</div>';
+  });
 }
 
 function renderSummarySection(summary) {
