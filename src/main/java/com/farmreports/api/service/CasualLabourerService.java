@@ -121,10 +121,9 @@ public class CasualLabourerService {
         session.setDefaultDailyRate(request.defaultDailyRate());
 
         for (WorkSessionEntryRequest er : request.entries()) {
-            Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(
-                            er.casualLabourerId(), farmId, EmploymentType.CASUAL)
+            Employee employee = employeeRepository.findByIdAndFarmId(er.casualLabourerId(), farmId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "Casual labourer not found: " + er.casualLabourerId()));
+                            "Employee not found: " + er.casualLabourerId()));
             CasualWorkEntry entry = new CasualWorkEntry();
             entry.setSession(session);
             entry.setEmployee(employee);
@@ -146,10 +145,9 @@ public class CasualLabourerService {
 
         session.getEntries().clear();
         for (WorkSessionEntryRequest er : request.entries()) {
-            Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(
-                            er.casualLabourerId(), farmId, EmploymentType.CASUAL)
+            Employee employee = employeeRepository.findByIdAndFarmId(er.casualLabourerId(), farmId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
-                            "Casual labourer not found: " + er.casualLabourerId()));
+                            "Employee not found: " + er.casualLabourerId()));
             CasualWorkEntry entry = new CasualWorkEntry();
             entry.setSession(session);
             entry.setEmployee(employee);
