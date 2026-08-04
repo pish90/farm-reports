@@ -89,6 +89,16 @@ public class CasualLabourerController {
         return ApiResponse.ok(casualLabourerService.getSummary(farmId, labourerId));
     }
 
+    @GetMapping("/{farmId}/casual-labourers/{labourerId}/ledger")
+    public ApiResponse<EmployeeLedgerDto> getLedger(
+            @PathVariable Integer farmId,
+            @PathVariable Integer labourerId,
+            @RequestParam Integer year,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        return ApiResponse.ok(casualLabourerService.getLedger(farmId, labourerId, year));
+    }
+
     // ── Payments ──────────────────────────────────────────────────────────────
 
     @PostMapping("/{farmId}/casual-labourers/{labourerId}/payments")

@@ -203,6 +203,64 @@ public class CasualLabourerService {
         }).toList();
     }
 
+    // ── Annual ledger ─────────────────────────────────────────────────────────
+
+    @Transactional(readOnly = true)
+    public EmployeeLedgerDto getLedger(Integer farmId, Integer labourerId, Integer year) {
+        employeeRepository.findByIdAndFarmIdAndEmploymentType(labourerId, farmId, EmploymentType.CASUAL)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
+
+        LocalDate yearStart = LocalDate.of(year, 1, 1);
+
+        List<CasualWorkSession> sessions = workSessionRepository.findByFarmIdWithEntries(farmId);
+        BigDecimal openingEarned = BigDecimal.ZERO;
+        BigDecimal[] earnedByMonth = new BigDecimal[13];
+        java.util.Arrays.fill(earnedByMonth, BigDecimal.ZERO);
+        for (CasualWorkSession session : sessions) {
+            for (CasualWorkEntry entry : session.getEntries()) {
+                if (!entry.getEmployee().getId().equals(labourerId)) continue;
+                LocalDate date = session.getSessionDate();
+                BigDecimal rate = entry.effectiveRate();
+                if (date.isBefore(yearStart)) {
+                    openingEarned = openingEarned.add(rate);
+                } else if (date.getYear() == year) {
+                    int m = date.getMonthValue();
+                    earnedByMonth[m] = earnedByMonth[m].add(rate);
+                }
+            }
+        }
+
+        List<CasualLabourerPayment> payments = paymentRepository.findByEmployeeIdOrderByPaymentDateDesc(labourerId);
+        BigDecimal openingPaid = BigDecimal.ZERO;
+        BigDecimal[] paidByMonth = new BigDecimal[13];
+        java.util.Arrays.fill(paidByMonth, BigDecimal.ZERO);
+        for (CasualLabourerPayment payment : payments) {
+            LocalDate date = payment.getPaymentDate();
+            if (date.isBefore(yearStart)) {
+                openingPaid = openingPaid.add(payment.getAmount());
+            } else if (date.getYear() == year) {
+                int m = date.getMonthValue();
+                paidByMonth[m] = paidByMonth[m].add(payment.getAmount());
+            }
+        }
+
+        BigDecimal openingBalance = openingEarned.subtract(openingPaid);
+        List<EmployeeLedgerMonthDto> months = new java.util.ArrayList<>();
+        BigDecimal running = openingBalance;
+        BigDecimal totalEarned = BigDecimal.ZERO;
+        BigDecimal totalPaid = BigDecimal.ZERO;
+        for (int m = 1; m <= 12; m++) {
+            BigDecimal earned = earnedByMonth[m];
+            BigDecimal paid = paidByMonth[m];
+            running = running.add(earned).subtract(paid);
+            totalEarned = totalEarned.add(earned);
+            totalPaid = totalPaid.add(paid);
+            months.add(new EmployeeLedgerMonthDto(m, earned, paid, running));
+        }
+
+        return new EmployeeLedgerDto(year, openingBalance, totalEarned, totalPaid, running, months);
+    }
+
     // ── Per-labourer summary ─────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
