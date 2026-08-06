@@ -100,12 +100,13 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 ## Database / Flyway Notes
 
 - Seed data is in `V2__seed.sql` (farms, users, livestock types). Workers and reports are created via the API.
-- The confirmed valid BCrypt hash for the default password `"changeme"` is `$2a$10$RlfO3Cgv2ulVh2B3gMcxGOz.hNiSyZfxJTz92b50IlSlYz8CSLlXe`. Use `HashGen.java` to generate hashes for new seed migrations.
+- The confirmed valid BCrypt hash for the default password `"changeme"` is `$2a$10$Jo5jGv4K781lpnmvNTMuOelw2K22RenTJD3MFl22XBdAqoFoY7Srm` (round-trip verified 2026-08-06 via `HashGen.java` after the previously-documented hash here turned out not to match `"changeme"` — see V38). Always re-verify a hash with `HashGen.java`'s round-trip check before trusting it in a migration; don't copy hashes between migrations without confirming.
 - When adding new livestock categories, add them to the `LivestockCategory` enum AND insert the new `livestock_types` rows via a new migration.
 
 ### Migration history (latest first)
 | Version | Description |
 |---|---|
+| V38 | Fixes Silas Khayundi's password hash — V37's hash didn't actually verify against `changeme` (copied from a stale CLAUDE.md note). |
 | V37 | Adds ADMIN login for client (Silas Khayundi, `skhayundi@gmail.com`), farm_id NULL, temp password `changeme`, `must_change_password=true`. |
 | V36 | Appends a farm letter to existing `ls_number` values (e.g. `LS2001K`). See LS number format below. |
 | V35 | Adds `gender VARCHAR(10)` (nullable) to `employees` table. |
@@ -116,7 +117,7 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 | V30 | (previous — check file for details) |
 | V29 | Employee unification — merged `workers` into `employees` table; full name stored in `first_name` column (single field, no last_name for migrated workers) |
 
-**Next migration must be V38.**
+**Next migration must be V39.**
 
 ### LS number format
 `ls_number` is `LS` + a globally shared sequence + a single farm letter fixed at hire time, e.g. `LS2001K`. The letter is looked up from the farm name at generation time (`EmployeeIdService.letterFor`) and never changes even if the employee later transfers farms. Mapping: `Les A`→A, `Les B`→B, `Kenlet`→K, `Siyoi`→S, `Matunda`→M.
