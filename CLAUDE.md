@@ -106,6 +106,7 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 ### Migration history (latest first)
 | Version | Description |
 |---|---|
+| V37 | Adds ADMIN login for client (Silas Khayundi, `skhayundi@gmail.com`), farm_id NULL, temp password `changeme`, `must_change_password=true`. |
 | V36 | Appends a farm letter to existing `ls_number` values (e.g. `LS2001K`). See LS number format below. |
 | V35 | Adds `gender VARCHAR(10)` (nullable) to `employees` table. |
 | V34 | Employee profile — adds `ls_number` (global unique, starts LS2001), `date_of_birth`, `national_id` to `employees`; backfills LS numbers for all existing employees in ID order; creates `employee_payments` table for salaried staff payments. |
@@ -115,7 +116,7 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 | V30 | (previous — check file for details) |
 | V29 | Employee unification — merged `workers` into `employees` table; full name stored in `first_name` column (single field, no last_name for migrated workers) |
 
-**Next migration must be V37.**
+**Next migration must be V38.**
 
 ### LS number format
 `ls_number` is `LS` + a globally shared sequence + a single farm letter fixed at hire time, e.g. `LS2001K`. The letter is looked up from the farm name at generation time (`EmployeeIdService.letterFor`) and never changes even if the employee later transfers farms. Mapping: `Les A`→A, `Les B`→B, `Kenlet`→K, `Siyoi`→S, `Matunda`→M.
