@@ -7,6 +7,13 @@ import lombok.RequiredArgsConstructor;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.DateUtil;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -19,8 +26,10 @@ import java.io.StringReader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -107,6 +116,19 @@ public class EmployeeService {
     private static final int MAX_IMPORT_ROWS = 1000;
     private static final List<String> REQUIRED_IMPORT_COLUMNS = List.of("farmName", "firstName", "employmentType");
 
+    // Normalized (lowercase, alphanumeric-only) field keys shared by the CSV and XLSX importers.
+    private static final String F_FARM_NAME = "farmname";
+    private static final String F_FIRST_NAME = "firstname";
+    private static final String F_LAST_NAME = "lastname";
+    private static final String F_PHONE = "phone";
+    private static final String F_EMPLOYMENT_TYPE = "employmenttype";
+    private static final String F_JOB_TITLE = "jobtitle";
+    private static final String F_START_DATE = "startdate";
+    private static final String F_DATE_OF_BIRTH = "dateofbirth";
+    private static final String F_NATIONAL_ID = "nationalid";
+    private static final String F_GENDER = "gender";
+    private static final String F_DEFAULT_DAILY_RATE = "defaultdailyrate";
+
     /**
      * Validates every row first; if any row fails, nothing is inserted and every
      * row's error is returned. Only once all rows are clean does it insert them,
@@ -133,21 +155,16 @@ public class EmployeeService {
                 .build();
 
         List<CSVRecord> records;
-        Set<String> presentHeaders;
+        Map<String, String> headerByNormalized;
         try (CSVParser parser = CSVParser.parse(new StringReader(content), format)) {
-            presentHeaders = parser.getHeaderNames().stream().map(String::toLowerCase).collect(Collectors.toSet());
+            headerByNormalized = parser.getHeaderNames().stream()
+                    .collect(Collectors.toMap(EmployeeService::normalizeHeader, h -> h, (a, b) -> a));
             records = parser.getRecords();
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not parse CSV: " + e.getMessage());
         }
 
-        List<String> missingColumns = REQUIRED_IMPORT_COLUMNS.stream()
-                .filter(c -> !presentHeaders.contains(c.toLowerCase()))
-                .toList();
-        if (!missingColumns.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "CSV is missing required column(s): " + String.join(", ", missingColumns));
-        }
+        assertRequiredColumnsPresent(headerByNormalized.keySet());
         if (records.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CSV file has no data rows");
         }
@@ -156,24 +173,105 @@ public class EmployeeService {
                     "CSV exceeds maximum of " + MAX_IMPORT_ROWS + " rows per import");
         }
 
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (CSVRecord record : records) {
+            Map<String, String> fields = new LinkedHashMap<>();
+            for (Map.Entry<String, String> e : headerByNormalized.entrySet()) {
+                String v = record.get(e.getValue());
+                fields.put(e.getKey(), v != null && !v.isBlank() ? v.trim() : null);
+            }
+            rows.add(fields);
+        }
+
+        return runImport(rows);
+    }
+
+    /**
+     * Same validate-then-insert contract as {@link #importEmployeesFromCsv}, but reads the
+     * first sheet of an .xlsx workbook (e.g. the "employee_import_template" sheet) instead.
+     */
+    @Transactional
+    public EmployeeCsvImportResult importEmployeesFromXlsx(MultipartFile file) {
+        List<Map<String, String>> rows;
+        try (Workbook workbook = WorkbookFactory.create(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+            Row headerRow = sheet.getRow(sheet.getFirstRowNum());
+            if (headerRow == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "XLSX file has no header row");
+            }
+
+            Map<Integer, String> normalizedByColumn = new LinkedHashMap<>();
+            for (Cell cell : headerRow) {
+                String value = readCellAsString(cell);
+                if (value != null && !value.isBlank()) {
+                    normalizedByColumn.put(cell.getColumnIndex(), normalizeHeader(value));
+                }
+            }
+            assertRequiredColumnsPresent(new java.util.HashSet<>(normalizedByColumn.values()));
+
+            rows = new ArrayList<>();
+            for (int r = headerRow.getRowNum() + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null || isRowBlank(row)) continue;
+
+                Map<String, String> fields = new LinkedHashMap<>();
+                for (Map.Entry<Integer, String> e : normalizedByColumn.entrySet()) {
+                    Cell cell = row.getCell(e.getKey());
+                    String value = readCellAsString(cell);
+                    fields.put(e.getValue(), value != null && !value.isBlank() ? value.trim() : null);
+                }
+                rows.add(fields);
+            }
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read XLSX file: " + e.getMessage());
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not parse XLSX file: " + e.getMessage());
+        }
+
+        if (rows.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "XLSX file has no data rows");
+        }
+        if (rows.size() > MAX_IMPORT_ROWS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "XLSX exceeds maximum of " + MAX_IMPORT_ROWS + " rows per import");
+        }
+
+        return runImport(rows);
+    }
+
+    private void assertRequiredColumnsPresent(Set<String> normalizedHeaders) {
+        List<String> missingColumns = REQUIRED_IMPORT_COLUMNS.stream()
+                .filter(c -> !normalizedHeaders.contains(normalizeHeader(c)))
+                .toList();
+        if (!missingColumns.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "File is missing required column(s): " + String.join(", ", missingColumns));
+        }
+    }
+
+    /** Shared validate-all-then-insert-all logic used by both the CSV and XLSX importers. */
+    private EmployeeCsvImportResult runImport(List<Map<String, String>> rows) {
         Map<String, Farm> farmsByName = farmRepo.findAll().stream()
                 .collect(Collectors.toMap(f -> f.getName().trim().toLowerCase(), f -> f, (a, b) -> a));
 
         List<EmployeeCsvRowError> errors = new ArrayList<>();
         List<ValidImportRow> validRows = new ArrayList<>();
         int rowNum = 1;
-        for (CSVRecord record : records) {
+        for (Map<String, String> fields : rows) {
             rowNum++;
             List<String> issues = new ArrayList<>();
 
-            String farmName = getField(record, presentHeaders, "farmName");
-            String firstName = getField(record, presentHeaders, "firstName");
-            String lastName = getField(record, presentHeaders, "lastName");
-            String phone = getField(record, presentHeaders, "phone");
-            String employmentTypeRaw = getField(record, presentHeaders, "employmentType");
-            String jobTitle = getField(record, presentHeaders, "jobTitle");
-            String startDate = getField(record, presentHeaders, "startDate");
-            String defaultDailyRateRaw = getField(record, presentHeaders, "defaultDailyRate");
+            String farmName = fields.get(F_FARM_NAME);
+            String firstName = fields.get(F_FIRST_NAME);
+            String lastName = fields.get(F_LAST_NAME);
+            String phone = fields.get(F_PHONE);
+            String employmentTypeRaw = fields.get(F_EMPLOYMENT_TYPE);
+            String jobTitle = fields.get(F_JOB_TITLE);
+            String startDate = fields.get(F_START_DATE);
+            String dateOfBirth = fields.get(F_DATE_OF_BIRTH);
+            String nationalId = fields.get(F_NATIONAL_ID);
+            String gender = fields.get(F_GENDER);
+            String defaultDailyRateRaw = fields.get(F_DEFAULT_DAILY_RATE);
 
             Farm farm = null;
             if (farmName == null) {
@@ -208,6 +306,14 @@ public class EmployeeService {
                 }
             }
 
+            if (dateOfBirth != null) {
+                try {
+                    LocalDate.parse(dateOfBirth);
+                } catch (Exception e) {
+                    issues.add("Invalid dateOfBirth '" + dateOfBirth + "' (expected yyyy-MM-dd)");
+                }
+            }
+
             BigDecimal defaultDailyRate = null;
             if (defaultDailyRateRaw != null) {
                 try {
@@ -227,13 +333,13 @@ public class EmployeeService {
 
             EmployeeRequest request = new EmployeeRequest(
                     firstName, lastName, phone, employmentType.name(), jobTitle,
-                    null, startDate, null, null, null,
+                    null, startDate, dateOfBirth, nationalId, gender,
                     defaultDailyRate, null, null, null);
             validRows.add(new ValidImportRow(farm.getId(), request));
         }
 
         if (!errors.isEmpty()) {
-            return new EmployeeCsvImportResult(false, records.size(), 0, errors);
+            return new EmployeeCsvImportResult(false, rows.size(), 0, errors);
         }
 
         int imported = 0;
@@ -241,15 +347,41 @@ public class EmployeeService {
             createEmployee(row.farmId(), row.request());
             imported++;
         }
-        return new EmployeeCsvImportResult(true, records.size(), imported, List.of());
+        return new EmployeeCsvImportResult(true, rows.size(), imported, List.of());
     }
 
     private record ValidImportRow(Integer farmId, EmployeeRequest request) {}
 
-    private static String getField(CSVRecord record, Set<String> presentHeaders, String name) {
-        if (!presentHeaders.contains(name.toLowerCase())) return null;
-        String v = record.get(name);
-        return v != null && !v.isBlank() ? v : null;
+    private static String normalizeHeader(String s) {
+        return s.toLowerCase().replaceAll("[^a-z0-9]", "");
+    }
+
+    private static boolean isRowBlank(Row row) {
+        for (Cell cell : row) {
+            if (readCellAsString(cell) != null) return false;
+        }
+        return true;
+    }
+
+    /** Reads any POI cell type as a trimmed string, converting date-formatted numeric cells to ISO yyyy-MM-dd. */
+    private static String readCellAsString(Cell cell) {
+        if (cell == null) return null;
+        CellType type = cell.getCellType() == CellType.FORMULA ? cell.getCachedFormulaResultType() : cell.getCellType();
+        String value = switch (type) {
+            case STRING -> cell.getStringCellValue();
+            case NUMERIC -> {
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    yield cell.getLocalDateTimeCellValue().toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE);
+                }
+                double d = cell.getNumericCellValue();
+                yield (d == Math.floor(d) && !Double.isInfinite(d))
+                        ? String.valueOf((long) d)
+                        : String.valueOf(d);
+            }
+            case BOOLEAN -> String.valueOf(cell.getBooleanCellValue());
+            default -> null;
+        };
+        return value != null && !value.isBlank() ? value.trim() : null;
     }
 
     @Transactional

@@ -6,6 +6,7 @@ import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.security.ClaimsHelper;
 import com.farmreports.api.service.AdminService;
 import com.farmreports.api.service.AuditService;
+import com.farmreports.api.service.BulkImportService;
 import com.farmreports.api.service.EmployeeService;
 import com.farmreports.api.service.ExportService;
 import com.farmreports.api.service.ReportService;
@@ -34,6 +35,7 @@ public class AdminController {
     private final ExportService exportService;
     private final AuditService auditService;
     private final EmployeeService employeeService;
+    private final BulkImportService bulkImportService;
 
     // ── Dashboard / overview ───────────────────────────────────────────────────
 
@@ -68,17 +70,79 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
         if (file == null || file.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CSV file is required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is required");
         }
-        String filename = file.getOriginalFilename();
-        if (filename != null && !filename.toLowerCase(java.util.Locale.ROOT).endsWith(".csv")) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File must be a .csv file");
+        String filename = file.getOriginalFilename() != null
+                ? file.getOriginalFilename().toLowerCase(java.util.Locale.ROOT) : "";
+        EmployeeCsvImportResult result;
+        if (filename.endsWith(".xlsx")) {
+            result = employeeService.importEmployeesFromXlsx(file);
+        } else if (filename.endsWith(".csv")) {
+            result = employeeService.importEmployeesFromCsv(file);
+        } else {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File must be a .csv or .xlsx file");
         }
-        EmployeeCsvImportResult result = employeeService.importEmployeesFromCsv(file);
         if (result.success()) {
             auditService.log(AuditAction.EMPLOYEE_CSV_IMPORTED, auth, null, null,
                     "Employee", null,
-                    "CSV import: " + result.importedCount() + " employee(s) added across farms");
+                    "Bulk import: " + result.importedCount() + " employee(s) added across farms");
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @PostMapping(value = "/livestock/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ImportResult> importLivestock(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam Integer year,
+            Authentication auth) {
+        requireAdmin(auth);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is required");
+        }
+        ImportResult result = bulkImportService.importLivestockFromXlsx(file, year, ClaimsHelper.getUserId(auth));
+        if (result.success()) {
+            auditService.log(AuditAction.LIVESTOCK_XLSX_IMPORTED, auth, null, null,
+                    "MonthlyReport", null,
+                    "Livestock XLSX import for " + year + ": " + result.importedCount() + " farm-month(s) updated");
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @PostMapping(value = "/milk/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ImportResult> importMilk(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam Integer year,
+            Authentication auth) {
+        requireAdmin(auth);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is required");
+        }
+        ImportResult result = bulkImportService.importMilkFromXlsx(file, year, ClaimsHelper.getUserId(auth));
+        if (result.success()) {
+            auditService.log(AuditAction.MILK_XLSX_IMPORTED, auth, null, null,
+                    "MonthlyReport", null,
+                    "Milk XLSX import for " + year + ": " + result.importedCount() + " farm-month(s) updated");
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @PostMapping(value = "/employee-pay/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ImportResult> importEmployeePay(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam Integer startYear,
+            @RequestParam(defaultValue = "1") Integer startMonth,
+            Authentication auth) {
+        requireAdmin(auth);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is required");
+        }
+        ImportResult result = bulkImportService.importEmployeePayFromXlsx(
+                file, startYear, startMonth, ClaimsHelper.getUserId(auth), ClaimsHelper.getUserName(auth));
+        if (result.success()) {
+            auditService.log(AuditAction.EMPLOYEE_PAY_XLSX_IMPORTED, auth, null, null,
+                    "PayrollEntry", null,
+                    "Employee pay XLSX import starting " + startYear + "-" + String.format("%02d", startMonth)
+                            + ": " + result.importedCount() + " row(s) updated");
         }
         return ApiResponse.ok(result);
     }
