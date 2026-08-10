@@ -106,6 +106,7 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 ### Migration history (latest first)
 | Version | Description |
 |---|---|
+| V39 | Splits legacy `employees.first_name` into first/last name on the first space, for rows migrated from the old `workers`/`casual_labourers` tables (V29) that had the full name jammed into `first_name` with no `last_name`. Single-word names and rows that already have a `last_name` are left untouched. |
 | V38 | Fixes Silas Khayundi's password hash — V37's hash didn't actually verify against `changeme` (copied from a stale CLAUDE.md note). |
 | V37 | Adds ADMIN login for client (Silas Khayundi, `skhayundi@gmail.com`), farm_id NULL, temp password `changeme`, `must_change_password=true`. |
 | V36 | Appends a farm letter to existing `ls_number` values (e.g. `LS2001K`). See LS number format below. |
@@ -117,7 +118,7 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 | V30 | (previous — check file for details) |
 | V29 | Employee unification — merged `workers` into `employees` table; full name stored in `first_name` column (single field, no last_name for migrated workers) |
 
-**Next migration must be V39.**
+**Next migration must be V40.**
 
 ### LS number format
 `ls_number` is `LS` + a globally shared sequence + a single farm letter fixed at hire time, e.g. `LS2001K`. The letter is looked up from the farm name at generation time (`EmployeeIdService.letterFor`) and never changes even if the employee later transfers farms. Mapping: `Les A`→A, `Les B`→B, `Kenlet`→K, `Siyoi`→S, `Matunda`→M.
