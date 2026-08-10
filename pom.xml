@@ -87,6 +87,13 @@
             <version>5.2.5</version>
         </dependency>
 
+        <!-- Apache Commons CSV – bulk employee import -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-csv</artifactId>
+            <version>1.11.0</version>
+        </dependency>
+
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

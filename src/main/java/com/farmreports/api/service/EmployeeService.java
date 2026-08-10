@@ -4,18 +4,26 @@ import com.farmreports.api.dto.*;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.IOException;
+import java.io.StringReader;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -94,6 +102,154 @@ public class EmployeeService {
         applyPhoto(emp, request.photoBase64(), request.photoMimeType());
 
         return toDto(employeeRepo.save(emp));
+    }
+
+    private static final int MAX_IMPORT_ROWS = 1000;
+    private static final List<String> REQUIRED_IMPORT_COLUMNS = List.of("farmName", "firstName", "employmentType");
+
+    /**
+     * Validates every row first; if any row fails, nothing is inserted and every
+     * row's error is returned. Only once all rows are clean does it insert them,
+     * one {@link #createEmployee} call per row within this method's transaction.
+     */
+    @Transactional
+    public EmployeeCsvImportResult importEmployeesFromCsv(MultipartFile file) {
+        String content;
+        try {
+            content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read CSV file");
+        }
+        if (!content.isEmpty() && content.charAt(0) == 0xFEFF) {
+            content = content.substring(1);
+        }
+
+        CSVFormat format = CSVFormat.DEFAULT.builder()
+                .setHeader()
+                .setSkipHeaderRecord(true)
+                .setIgnoreHeaderCase(true)
+                .setTrim(true)
+                .setIgnoreEmptyLines(true)
+                .build();
+
+        List<CSVRecord> records;
+        Set<String> presentHeaders;
+        try (CSVParser parser = CSVParser.parse(new StringReader(content), format)) {
+            presentHeaders = parser.getHeaderNames().stream().map(String::toLowerCase).collect(Collectors.toSet());
+            records = parser.getRecords();
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not parse CSV: " + e.getMessage());
+        }
+
+        List<String> missingColumns = REQUIRED_IMPORT_COLUMNS.stream()
+                .filter(c -> !presentHeaders.contains(c.toLowerCase()))
+                .toList();
+        if (!missingColumns.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "CSV is missing required column(s): " + String.join(", ", missingColumns));
+        }
+        if (records.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CSV file has no data rows");
+        }
+        if (records.size() > MAX_IMPORT_ROWS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "CSV exceeds maximum of " + MAX_IMPORT_ROWS + " rows per import");
+        }
+
+        Map<String, Farm> farmsByName = farmRepo.findAll().stream()
+                .collect(Collectors.toMap(f -> f.getName().trim().toLowerCase(), f -> f, (a, b) -> a));
+
+        List<EmployeeCsvRowError> errors = new ArrayList<>();
+        List<ValidImportRow> validRows = new ArrayList<>();
+        int rowNum = 1;
+        for (CSVRecord record : records) {
+            rowNum++;
+            List<String> issues = new ArrayList<>();
+
+            String farmName = getField(record, presentHeaders, "farmName");
+            String firstName = getField(record, presentHeaders, "firstName");
+            String lastName = getField(record, presentHeaders, "lastName");
+            String phone = getField(record, presentHeaders, "phone");
+            String employmentTypeRaw = getField(record, presentHeaders, "employmentType");
+            String jobTitle = getField(record, presentHeaders, "jobTitle");
+            String startDate = getField(record, presentHeaders, "startDate");
+            String defaultDailyRateRaw = getField(record, presentHeaders, "defaultDailyRate");
+
+            Farm farm = null;
+            if (farmName == null) {
+                issues.add("Farm name is required");
+            } else {
+                farm = farmsByName.get(farmName.toLowerCase());
+                if (farm == null) {
+                    issues.add("Unknown farm: '" + farmName + "'");
+                }
+            }
+
+            if (firstName == null) {
+                issues.add("First name is required");
+            }
+
+            EmploymentType employmentType = null;
+            if (employmentTypeRaw == null) {
+                issues.add("Employment type is required");
+            } else {
+                try {
+                    employmentType = EmploymentType.valueOf(employmentTypeRaw.toUpperCase());
+                } catch (IllegalArgumentException e) {
+                    issues.add("Invalid employmentType '" + employmentTypeRaw + "' (must be SALARIED or CASUAL)");
+                }
+            }
+
+            if (startDate != null) {
+                try {
+                    LocalDate.parse(startDate);
+                } catch (Exception e) {
+                    issues.add("Invalid startDate '" + startDate + "' (expected yyyy-MM-dd)");
+                }
+            }
+
+            BigDecimal defaultDailyRate = null;
+            if (defaultDailyRateRaw != null) {
+                try {
+                    defaultDailyRate = new BigDecimal(defaultDailyRateRaw);
+                } catch (NumberFormatException e) {
+                    issues.add("Invalid defaultDailyRate '" + defaultDailyRateRaw + "'");
+                }
+            }
+
+            String rowSummary = (farmName != null ? farmName : "?") + " / "
+                    + (firstName != null ? firstName : "?") + (lastName != null ? " " + lastName : "");
+
+            if (!issues.isEmpty()) {
+                errors.add(new EmployeeCsvRowError(rowNum, rowSummary, String.join("; ", issues)));
+                continue;
+            }
+
+            EmployeeRequest request = new EmployeeRequest(
+                    firstName, lastName, phone, employmentType.name(), jobTitle,
+                    null, startDate, null, null, null,
+                    defaultDailyRate, null, null, null);
+            validRows.add(new ValidImportRow(farm.getId(), request));
+        }
+
+        if (!errors.isEmpty()) {
+            return new EmployeeCsvImportResult(false, records.size(), 0, errors);
+        }
+
+        int imported = 0;
+        for (ValidImportRow row : validRows) {
+            createEmployee(row.farmId(), row.request());
+            imported++;
+        }
+        return new EmployeeCsvImportResult(true, records.size(), imported, List.of());
+    }
+
+    private record ValidImportRow(Integer farmId, EmployeeRequest request) {}
+
+    private static String getField(CSVRecord record, Set<String> presentHeaders, String name) {
+        if (!presentHeaders.contains(name.toLowerCase())) return null;
+        String v = record.get(name);
+        return v != null && !v.isBlank() ? v : null;
     }
 
     @Transactional

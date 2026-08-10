@@ -18,6 +18,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.LocalDate;
@@ -59,6 +60,27 @@ public class AdminController {
     public ApiResponse<List<EmployeeDto>> getMasterEmployeeRegistry(Authentication auth) {
         requireAdmin(auth);
         return ApiResponse.ok(employeeService.getAllEmployeesAcrossFarms());
+    }
+
+    @PostMapping(value = "/employees/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<EmployeeCsvImportResult> importEmployees(
+            @RequestParam("file") MultipartFile file,
+            Authentication auth) {
+        requireAdmin(auth);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CSV file is required");
+        }
+        String filename = file.getOriginalFilename();
+        if (filename != null && !filename.toLowerCase(java.util.Locale.ROOT).endsWith(".csv")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File must be a .csv file");
+        }
+        EmployeeCsvImportResult result = employeeService.importEmployeesFromCsv(file);
+        if (result.success()) {
+            auditService.log(AuditAction.EMPLOYEE_CSV_IMPORTED, auth, null, null,
+                    "Employee", null,
+                    "CSV import: " + result.importedCount() + " employee(s) added across farms");
+        }
+        return ApiResponse.ok(result);
     }
 
     @PutMapping("/users/reset-password")

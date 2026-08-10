@@ -28,7 +28,10 @@ export async function render(container) {
   container.innerHTML = `
     <div class="section-title">
       <h2 style="margin:0">Employees</h2>
-      <button id="add-employee">Add employee</button>
+      <div style="display:flex;gap:0.5rem">
+        ${isAdmin() ? '<button id="import-csv" class="secondary">Import CSV</button>' : ''}
+        <button id="add-employee">Add employee</button>
+      </div>
     </div>
     <div class="card">
       <div class="toolbar">
@@ -98,8 +101,87 @@ export async function render(container) {
     const farmId = canSeeAllFarms() ? null : session.farmId;
     openEmployeeModal(null, farmId);
   });
+  container.querySelector('#import-csv')?.addEventListener('click', openImportCsvModal);
 
   draw();
+}
+
+function downloadCsvTemplate() {
+  const header = 'farmName,firstName,lastName,phone,employmentType,jobTitle,startDate,defaultDailyRate';
+  const example = 'Matunda,Jane,Doe,0712345678,SALARIED,Herdsman,2024-01-15,';
+  const csv = '﻿' + header + '\n' + example + '\n';
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'employee_import_template.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function openImportCsvModal() {
+  const { modal, close } = openModal(`
+    <h3>Import employees from CSV</h3>
+    <p class="text-dim">
+      Columns: <strong>farmName</strong>, <strong>firstName</strong>, lastName, phone,
+      <strong>employmentType</strong> (SALARIED or CASUAL), jobTitle, startDate (yyyy-mm-dd), defaultDailyRate.
+      Bold columns are required.
+    </p>
+    <p><button type="button" class="secondary" id="download-template">Download CSV template</button></p>
+    <form id="csv-import-form">
+      <div><label>CSV file</label><input type="file" name="csvFile" accept=".csv,text/csv" required></div>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="cancel-btn">Cancel</button>
+        <button type="submit">Import</button>
+      </div>
+    </form>
+    <div id="import-errors" hidden></div>
+  `);
+
+  modal.querySelector('#download-template').addEventListener('click', downloadCsvTemplate);
+  modal.querySelector('#cancel-btn').addEventListener('click', close);
+  modal.querySelector('#csv-import-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = modal.querySelector('input[name="csvFile"]').files[0];
+    if (!file) { showToast('Choose a CSV file', 'error'); return; }
+
+    const fd = new FormData();
+    fd.append('file', file);
+    const errorBox = modal.querySelector('#import-errors');
+
+    try {
+      const result = await api.postForm('/admin/employees/import', fd);
+      if (result.success) {
+        showToast(`Imported ${result.importedCount} employee(s)`, 'success');
+        close();
+        render(document.getElementById('view-container'));
+      } else {
+        errorBox.hidden = false;
+        errorBox.innerHTML = `
+          <p style="color:var(--danger);margin-top:1rem">
+            ${result.errors.length} row(s) have errors — fix and re-upload. Nothing was imported.
+          </p>
+          <div class="table-scroll" style="max-height:260px">
+            <table>
+              <thead><tr><th>Row</th><th>Who</th><th>Problem</th></tr></thead>
+              <tbody>${result.errors.map((err) => `
+                <tr>
+                  <td class="mono">${err.row}</td>
+                  <td>${escapeHtml(err.rowSummary)}</td>
+                  <td>${escapeHtml(err.message)}</td>
+                </tr>
+              `).join('')}</tbody>
+            </table>
+          </div>
+        `;
+        showToast(`${result.errors.length} row error(s) — see details below`, 'error');
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  });
 }
 
 async function openEmployeeModal(employee, forcedFarmId) {
