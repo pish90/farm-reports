@@ -9,6 +9,7 @@ import com.farmreports.api.entity.UserRole;
 import com.farmreports.api.repository.UserRepository;
 import com.farmreports.api.security.JwtAuthFilter;
 import com.farmreports.api.security.JwtService;
+import com.farmreports.api.service.AuditService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,6 +50,9 @@ class AuthControllerTest {
 
     @MockBean
     UserRepository userRepository;
+
+    @MockBean
+    AuditService auditService;
 
     private User testUser;
 
