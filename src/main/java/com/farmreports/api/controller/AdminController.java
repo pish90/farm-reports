@@ -9,6 +9,7 @@ import com.farmreports.api.service.AuditService;
 import com.farmreports.api.service.BulkImportService;
 import com.farmreports.api.service.EmployeeService;
 import com.farmreports.api.service.ExportService;
+import com.farmreports.api.service.ImportTemplateService;
 import com.farmreports.api.service.ReportService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,10 @@ public class AdminController {
     private final AuditService auditService;
     private final EmployeeService employeeService;
     private final BulkImportService bulkImportService;
+    private final ImportTemplateService importTemplateService;
+
+    private static final MediaType XLSX_MEDIA_TYPE =
+            MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
 
     // ── Dashboard / overview ───────────────────────────────────────────────────
 
@@ -90,6 +95,12 @@ public class AdminController {
         return ApiResponse.ok(result);
     }
 
+    @GetMapping("/employees/import/template")
+    public ResponseEntity<byte[]> downloadEmployeeImportTemplate(Authentication auth) {
+        requireAdmin(auth);
+        return xlsxAttachment(importTemplateService.buildEmployeeTemplate(), "employee_import_template.xlsx");
+    }
+
     @PostMapping(value = "/livestock/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<ImportResult> importLivestock(
             @RequestParam("file") MultipartFile file,
@@ -108,6 +119,12 @@ public class AdminController {
         return ApiResponse.ok(result);
     }
 
+    @GetMapping("/livestock/import/template")
+    public ResponseEntity<byte[]> downloadLivestockImportTemplate(Authentication auth) {
+        requireAdmin(auth);
+        return xlsxAttachment(importTemplateService.buildLivestockTemplate(), "livestock_import_template.xlsx");
+    }
+
     @PostMapping(value = "/milk/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<ImportResult> importMilk(
             @RequestParam("file") MultipartFile file,
@@ -124,6 +141,12 @@ public class AdminController {
                     "Milk XLSX import for " + year + ": " + result.importedCount() + " farm-month(s) updated");
         }
         return ApiResponse.ok(result);
+    }
+
+    @GetMapping("/milk/import/template")
+    public ResponseEntity<byte[]> downloadMilkImportTemplate(Authentication auth) {
+        requireAdmin(auth);
+        return xlsxAttachment(importTemplateService.buildMilkTemplate(), "milk_import_template.xlsx");
     }
 
     @PostMapping(value = "/employee-pay/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -145,6 +168,12 @@ public class AdminController {
                             + ": " + result.importedCount() + " row(s) updated");
         }
         return ApiResponse.ok(result);
+    }
+
+    @GetMapping("/employee-pay/import/template")
+    public ResponseEntity<byte[]> downloadEmployeePayImportTemplate(Authentication auth) {
+        requireAdmin(auth);
+        return xlsxAttachment(importTemplateService.buildEmployeePayTemplate(), "employee_pay_import_template.xlsx");
     }
 
     @PutMapping("/users/reset-password")
@@ -381,6 +410,13 @@ public class AdminController {
         if (!"ADMIN".equals(ClaimsHelper.getRole(auth))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Admin access required");
         }
+    }
+
+    private ResponseEntity<byte[]> xlsxAttachment(byte[] bytes, String filename) {
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .contentType(XLSX_MEDIA_TYPE)
+                .body(bytes);
     }
 
     private boolean isAdmin(Authentication auth) {
