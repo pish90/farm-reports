@@ -87,6 +87,8 @@ public class EmployeeService {
 
         EmploymentType type = parseType(request.employmentType());
 
+        assertNotDuplicate(farm.getId(), farm.getName(), request.firstName(), request.lastName(), null);
+
         Employee emp = new Employee();
         emp.setFarm(farm);
         emp.setEmployeeId(employeeIdService.generateFor(farm.getName()));
@@ -254,6 +256,14 @@ public class EmployeeService {
         Map<String, Farm> farmsByName = farmRepo.findAll().stream()
                 .collect(Collectors.toMap(f -> f.getName().trim().toLowerCase(), f -> f, (a, b) -> a));
 
+        // Employees are identified for dedup purposes by (farm, first name, last name) since
+        // employeeId/lsNumber are generated at insert time and can't be used to spot duplicates
+        // in an incoming file. Checked against both the DB and earlier rows in this same file.
+        Set<String> existingKeys = employeeRepo.findAll().stream()
+                .map(e -> dedupeKey(e.getFarm().getId(), e.getFirstName(), e.getLastName()))
+                .collect(Collectors.toSet());
+        Set<String> seenInFile = new java.util.HashSet<>();
+
         List<EmployeeCsvRowError> errors = new ArrayList<>();
         List<ValidImportRow> validRows = new ArrayList<>();
         int rowNum = 1;
@@ -285,6 +295,15 @@ public class EmployeeService {
 
             if (firstName == null) {
                 issues.add("First name is required");
+            } else if (farm != null) {
+                String key = dedupeKey(farm.getId(), firstName, lastName);
+                if (existingKeys.contains(key)) {
+                    issues.add("Employee already exists on " + farm.getName() + ": "
+                            + firstName + (lastName != null ? " " + lastName : ""));
+                } else if (!seenInFile.add(key)) {
+                    issues.add("Duplicate row in file: " + firstName + (lastName != null ? " " + lastName : "")
+                            + " on " + farm.getName() + " appears more than once");
+                }
             }
 
             EmploymentType employmentType = null;
@@ -356,6 +375,24 @@ public class EmployeeService {
         return s.toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
+    private static String dedupeKey(Integer farmId, String firstName, String lastName) {
+        String first = firstName.trim().toLowerCase();
+        String last = lastName != null ? lastName.trim().toLowerCase() : "";
+        return farmId + "|" + first + "|" + last;
+    }
+
+    /**
+     * Guards createEmployee/updateEmployee the same way {@link #runImport} guards bulk import:
+     * same farm + first + last name (case/whitespace-insensitive) is treated as the same person.
+     * excludeEmployeeId lets an update pass against its own unchanged record.
+     */
+    private void assertNotDuplicate(Integer farmId, String farmName, String firstName, String lastName, Integer excludeEmployeeId) {
+        if (employeeRepo.existsDuplicate(farmId, firstName, lastName, excludeEmployeeId)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Employee already exists on " + farmName + ": "
+                    + firstName + (lastName != null && !lastName.isBlank() ? " " + lastName : ""));
+        }
+    }
+
     private static boolean isRowBlank(Row row) {
         for (Cell cell : row) {
             if (readCellAsString(cell) != null) return false;
@@ -387,6 +424,8 @@ public class EmployeeService {
     @Transactional
     public EmployeeDto updateEmployee(Integer farmId, Integer id, EmployeeRequest request) {
         Employee emp = findOrThrow(farmId, id);
+
+        assertNotDuplicate(farmId, emp.getFarm().getName(), request.firstName(), request.lastName(), id);
 
         emp.setFirstName(request.firstName().trim());
         emp.setLastName(request.lastName() != null && !request.lastName().isBlank() ? request.lastName().trim() : null);

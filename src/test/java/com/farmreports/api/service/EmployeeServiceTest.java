@@ -1,6 +1,7 @@
 package com.farmreports.api.service;
 
 import com.farmreports.api.dto.EmployeeCsvImportResult;
+import com.farmreports.api.dto.EmployeeRequest;
 import com.farmreports.api.entity.Employee;
 import com.farmreports.api.entity.Farm;
 import com.farmreports.api.repository.DepartmentRepository;
@@ -15,14 +16,18 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -116,6 +121,89 @@ class EmployeeServiceTest {
 
         // Validation-failure must write nothing: no LS numbers burned, no rows saved.
         verifyNoInteractions(employeeIdService);
+        verify(employeeRepo, never()).save(any());
+    }
+
+    @Test
+    void importEmployeesFromCsv_matchesExistingEmployee_rejectsRowAsDuplicate() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda, lesA, kenlet));
+
+        Employee existing = new Employee();
+        existing.setFarm(matunda);
+        existing.setFirstName("Jane");
+        existing.setLastName("Doe");
+        when(employeeRepo.findAll()).thenReturn(List.of(existing));
+
+        String csv = "farmName,firstName,lastName,phone,employmentType,jobTitle,startDate,defaultDailyRate\n"
+                + "Matunda,jane,doe,0712345678,SALARIED,Herdsman,2024-01-15,\n";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "employees.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
+
+        EmployeeCsvImportResult result = employeeService.importEmployeesFromCsv(file);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.importedCount()).isEqualTo(0);
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().get(0).message()).contains("already exists");
+        verifyNoInteractions(employeeIdService);
+        verify(employeeRepo, never()).save(any());
+    }
+
+    @Test
+    void importEmployeesFromCsv_duplicateRowsInSameFile_rejectsSecondOccurrence() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda, lesA, kenlet));
+        when(employeeRepo.findAll()).thenReturn(List.of());
+
+        String csv = "farmName,firstName,lastName,phone,employmentType,jobTitle,startDate,defaultDailyRate\n"
+                + "Matunda,Jane,Doe,0712345678,SALARIED,Herdsman,2024-01-15,\n"
+                + "matunda,JANE,DOE,,CASUAL,General worker,,450.00\n";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "employees.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
+
+        EmployeeCsvImportResult result = employeeService.importEmployeesFromCsv(file);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.importedCount()).isEqualTo(0);
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().get(0).row()).isEqualTo(3);
+        assertThat(result.errors().get(0).message()).contains("Duplicate row in file");
+        verifyNoInteractions(employeeIdService);
+        verify(employeeRepo, never()).save(any());
+    }
+
+    @Test
+    void createEmployee_matchesExistingEmployee_throwsConflict() {
+        when(farmRepo.findById(1)).thenReturn(Optional.of(matunda));
+        when(employeeRepo.existsDuplicate(eq(1), eq("Jane"), eq("Doe"), isNull())).thenReturn(true);
+
+        EmployeeRequest request = new EmployeeRequest(
+                "Jane", "Doe", null, "SALARIED", null, null, null, null, null, null, null, null, null, null);
+
+        assertThatThrownBy(() -> employeeService.createEmployee(1, request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("already exists");
+
+        verifyNoInteractions(employeeIdService);
+        verify(employeeRepo, never()).save(any());
+    }
+
+    @Test
+    void updateEmployee_renamedToMatchAnotherEmployee_throwsConflict() {
+        Employee existing = new Employee();
+        existing.setId(5);
+        existing.setFarm(matunda);
+        existing.setFirstName("Old");
+        existing.setLastName("Name");
+        when(employeeRepo.findByIdAndFarmId(5, 1)).thenReturn(Optional.of(existing));
+        when(employeeRepo.existsDuplicate(1, "Jane", "Doe", 5)).thenReturn(true);
+
+        EmployeeRequest request = new EmployeeRequest(
+                "Jane", "Doe", null, "SALARIED", null, null, null, null, null, null, null, null, null, null);
+
+        assertThatThrownBy(() -> employeeService.updateEmployee(1, 5, request))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("already exists");
+
         verify(employeeRepo, never()).save(any());
     }
 }

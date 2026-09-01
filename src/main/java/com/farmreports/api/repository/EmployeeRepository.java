@@ -31,4 +31,11 @@ public interface EmployeeRepository extends JpaRepository<Employee, Integer> {
     Optional<Employee> findByIdAndFarmIdAndEmploymentType(Integer id, Integer farmId, EmploymentType type);
 
     long countByFarmIdAndStatusAndEmploymentType(Integer farmId, String status, EmploymentType type);
+
+    /** Case/whitespace-insensitive match on (farm, first name, last name); excludeId skips the row being updated. */
+    @Query("SELECT COUNT(e) > 0 FROM Employee e WHERE e.farm.id = :farmId " +
+           "AND LOWER(TRIM(e.firstName)) = LOWER(TRIM(:firstName)) " +
+           "AND COALESCE(LOWER(TRIM(e.lastName)), '') = COALESCE(LOWER(TRIM(:lastName)), '') " +
+           "AND (:excludeId IS NULL OR e.id <> :excludeId)")
+    boolean existsDuplicate(Integer farmId, String firstName, String lastName, Integer excludeId);
 }
