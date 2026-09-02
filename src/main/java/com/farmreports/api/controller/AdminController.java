@@ -64,9 +64,15 @@ public class AdminController {
     // ── Master employee registry (all farms) ───────────────────────────────────
 
     @GetMapping("/employees")
-    public ApiResponse<List<EmployeeDto>> getMasterEmployeeRegistry(Authentication auth) {
+    public ApiResponse<PageDto<EmployeeDto>> getMasterEmployeeRegistry(
+            @RequestParam(required = false) Integer farmId,
+            @RequestParam(required = false) String employmentType,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            Authentication auth) {
         requireAdmin(auth);
-        return ApiResponse.ok(employeeService.getAllEmployeesAcrossFarms());
+        return ApiResponse.ok(employeeService.getAllEmployeesAcrossFarms(farmId, employmentType, search, page, size));
     }
 
     @PostMapping(value = "/employees/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -188,15 +194,17 @@ public class AdminController {
     }
 
     @GetMapping("/reports")
-    public ApiResponse<List<ReportDto>> listReports(
+    public ApiResponse<PageDto<ReportDto>> listReports(
             @RequestParam(required = false) Integer farmId,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer month,
             @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
             Authentication auth) {
         requireDashboardRole(auth);
         Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? farmId : ClaimsHelper.getFarmId(auth);
-        return ApiResponse.ok(adminService.listReports(effectiveFarmId, year, month, status));
+        return ApiResponse.ok(adminService.listReports(effectiveFarmId, year, month, status, page, size));
     }
 
     // ── Admin report read/create ───────────────────────────────────────────────
@@ -374,14 +382,14 @@ public class AdminController {
     // ── Audit logs ─────────────────────────────────────────────────────────────
 
     @GetMapping("/audit-logs")
-    public ApiResponse<AuditLogPageDto> getAuditLogs(
+    public ApiResponse<PageDto<AuditLogDto>> getAuditLogs(
             @RequestParam(required = false) Integer farmId,
             @RequestParam(required = false) Integer userId,
             @RequestParam(required = false) String action,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(defaultValue = "10") int size,
             Authentication auth) {
         requireDashboardRole(auth);
         Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? farmId : ClaimsHelper.getFarmId(auth);

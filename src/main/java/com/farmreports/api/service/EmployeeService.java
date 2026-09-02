@@ -14,6 +14,10 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -50,21 +54,11 @@ public class EmployeeService {
     // ── Registry ──────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public List<EmployeeDto> getEmployees(Integer farmId, String employmentType, String search) {
-        List<Employee> employees;
-        if (search != null && !search.isBlank()) {
-            employees = employeeRepo.searchByFarmId(farmId, search.trim());
-            if (employmentType != null) {
-                EmploymentType type = parseType(employmentType);
-                employees = employees.stream().filter(e -> e.getEmploymentType() == type).toList();
-            }
-        } else if (employmentType != null) {
-            employees = employeeRepo.findByFarmIdAndEmploymentTypeOrderByFirstNameAscLastNameAsc(
-                    farmId, parseType(employmentType));
-        } else {
-            employees = employeeRepo.findByFarmIdOrderByFirstNameAscLastNameAsc(farmId);
-        }
-        return employees.stream().map(this::toDto).toList();
+    public PageDto<EmployeeDto> getEmployees(Integer farmId, String employmentType, String search,
+                                              String status, int page, int size) {
+        Specification<Employee> spec = buildSpec(farmId, employmentType, search, status);
+        Sort sort = Sort.by(Sort.Direction.ASC, "firstName").and(Sort.by(Sort.Direction.ASC, "lastName"));
+        return toPageDto(employeeRepo.findAll(spec, PageRequest.of(page, size, sort)));
     }
 
     @Transactional(readOnly = true)
@@ -75,9 +69,41 @@ public class EmployeeService {
 
     /** ADMIN-only master registry: every employee across every farm. */
     @Transactional(readOnly = true)
-    public List<EmployeeDto> getAllEmployeesAcrossFarms() {
-        return employeeRepo.findAllOrderByFarmAndName()
-                .stream().map(this::toDto).toList();
+    public PageDto<EmployeeDto> getAllEmployeesAcrossFarms(Integer farmId, String employmentType, String search,
+                                                             int page, int size) {
+        Specification<Employee> spec = buildSpec(farmId, employmentType, search, null);
+        Sort sort = Sort.by(Sort.Direction.ASC, "farm.name")
+                .and(Sort.by(Sort.Direction.ASC, "firstName"))
+                .and(Sort.by(Sort.Direction.ASC, "lastName"));
+        return toPageDto(employeeRepo.findAll(spec, PageRequest.of(page, size, sort)));
+    }
+
+    private static Specification<Employee> buildSpec(Integer farmId, String employmentType,
+                                                       String search, String status) {
+        Specification<Employee> spec = Specification.where(null);
+        if (farmId != null) {
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("farm").get("id"), farmId));
+        }
+        if (employmentType != null && !employmentType.isBlank()) {
+            EmploymentType type = parseType(employmentType);
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("employmentType"), type));
+        }
+        if (status != null && !status.isBlank()) {
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("status"), status));
+        }
+        if (search != null && !search.isBlank()) {
+            String like = "%" + search.trim().toLowerCase() + "%";
+            spec = spec.and((root, q, cb) -> cb.or(
+                    cb.like(cb.lower(root.get("firstName")), like),
+                    cb.like(cb.lower(root.get("lastName")), like),
+                    cb.like(cb.lower(root.get("lsNumber")), like)));
+        }
+        return spec;
+    }
+
+    private PageDto<EmployeeDto> toPageDto(Page<Employee> page) {
+        List<EmployeeDto> content = page.getContent().stream().map(this::toDto).toList();
+        return new PageDto<>(content, page.getTotalElements(), page.getTotalPages(), page.getNumber(), page.getSize());
     }
 
     @Transactional

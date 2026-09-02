@@ -136,10 +136,15 @@ public class CasualLabourerController {
     // ── Work Sessions ─────────────────────────────────────────────────────────
 
     @GetMapping("/{farmId}/casual-labourers/work-sessions")
-    public ApiResponse<List<CasualWorkSessionDto>> getWorkSessions(
-            @PathVariable Integer farmId, Authentication auth) {
+    public ApiResponse<PageDto<CasualWorkSessionDto>> getWorkSessions(
+            @PathVariable Integer farmId,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer month,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            Authentication auth) {
         checkFarmAccess(farmId, auth);
-        return ApiResponse.ok(casualLabourerService.getWorkSessions(farmId));
+        return ApiResponse.ok(casualLabourerService.getWorkSessions(farmId, year, month, page, size));
     }
 
     @PostMapping("/{farmId}/casual-labourers/work-sessions")

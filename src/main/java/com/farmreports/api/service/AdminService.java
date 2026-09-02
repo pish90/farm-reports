@@ -2,10 +2,14 @@ package com.farmreports.api.service;
 
 import com.farmreports.api.dto.FarmLiveStatusDto;
 import com.farmreports.api.dto.FarmSummaryDto;
+import com.farmreports.api.dto.PageDto;
 import com.farmreports.api.dto.ReportDto;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -94,7 +98,8 @@ public class AdminService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
     }
 
-    public List<ReportDto> listReports(Integer farmId, Integer year, Integer month, String status) {
+    public PageDto<ReportDto> listReports(Integer farmId, Integer year, Integer month, String status,
+                                           int page, int size) {
         Specification<MonthlyReport> spec = Specification.where(null);
         if (farmId != null)
             spec = spec.and((root, q, cb) -> cb.equal(root.get("farm").get("id"), farmId));
@@ -105,17 +110,17 @@ public class AdminService {
         if (status != null)
             spec = spec.and((root, q, cb) -> cb.equal(root.get("status"), ReportStatus.valueOf(status)));
 
-        return reportRepository.findAll(spec).stream()
-            .sorted((a, b) -> {
-                int yc = b.getYear().compareTo(a.getYear());
-                return yc != 0 ? yc : b.getMonth().compareTo(a.getMonth());
-            })
+        Sort sort = Sort.by(Sort.Direction.DESC, "year").and(Sort.by(Sort.Direction.DESC, "month"));
+        Page<MonthlyReport> result = reportRepository.findAll(spec, PageRequest.of(page, size, sort));
+
+        List<ReportDto> content = result.getContent().stream()
             .map(r -> new ReportDto(
                 r.getId(), r.getFarm().getId(), r.getYear(), r.getMonth(),
                 r.getStatus().name(), r.getSubmittedAt(), r.getCreatedAt(),
                 null, null, null, null, null
             ))
             .toList();
+        return new PageDto<>(content, result.getTotalElements(), result.getTotalPages(), page, size);
     }
 
     public String buildAttendanceCsv() {

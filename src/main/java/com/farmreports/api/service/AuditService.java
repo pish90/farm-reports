@@ -1,7 +1,7 @@
 package com.farmreports.api.service;
 
 import com.farmreports.api.dto.AuditLogDto;
-import com.farmreports.api.dto.AuditLogPageDto;
+import com.farmreports.api.dto.PageDto;
 import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.entity.AuditLog;
 import com.farmreports.api.repository.AuditLogRepository;
@@ -57,7 +57,7 @@ public class AuditService {
     }
 
     @Transactional(readOnly = true)
-    public AuditLogPageDto getAuditLogs(Integer farmId, Integer userId, String action,
+    public PageDto<AuditLogDto> getAuditLogs(Integer farmId, Integer userId, String action,
                                         LocalDate startDate, LocalDate endDate,
                                         int page, int size) {
         AuditAction auditAction = null;
@@ -66,7 +66,7 @@ public class AuditService {
                 auditAction = AuditAction.valueOf(action.toUpperCase());
             } catch (IllegalArgumentException e) {
                 // unknown action — return empty result
-                return new AuditLogPageDto(List.of(), 0, 0, page, size);
+                return new PageDto<>(List.of(), 0, 0, page, size);
             }
         }
 
@@ -78,7 +78,7 @@ public class AuditService {
                 farmId, userId, actionName, start, end, PageRequest.of(page, size));
 
         List<AuditLogDto> content = results.getContent().stream().map(this::rowToDto).toList();
-        return new AuditLogPageDto(content, results.getTotalElements(),
+        return new PageDto<>(content, results.getTotalElements(),
                 results.getTotalPages(), page, size);
     }
 

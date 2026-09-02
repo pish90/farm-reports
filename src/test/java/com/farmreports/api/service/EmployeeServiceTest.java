@@ -1,8 +1,11 @@
 package com.farmreports.api.service;
 
 import com.farmreports.api.dto.EmployeeCsvImportResult;
+import com.farmreports.api.dto.EmployeeDto;
 import com.farmreports.api.dto.EmployeeRequest;
+import com.farmreports.api.dto.PageDto;
 import com.farmreports.api.entity.Employee;
+import com.farmreports.api.entity.EmploymentType;
 import com.farmreports.api.entity.Farm;
 import com.farmreports.api.repository.DepartmentRepository;
 import com.farmreports.api.repository.EmployeePaymentRepository;
@@ -14,6 +17,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -205,5 +212,48 @@ class EmployeeServiceTest {
                 .hasMessageContaining("already exists");
 
         verify(employeeRepo, never()).save(any());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void getEmployees_defaultsToPageZeroSizeTen() {
+        Employee jane = new Employee();
+        jane.setId(1);
+        jane.setFarm(matunda);
+        jane.setFirstName("Jane");
+        jane.setLastName("Doe");
+        jane.setEmploymentType(EmploymentType.SALARIED);
+        jane.setStatus("ACTIVE");
+
+        Page<Employee> page = new PageImpl<>(List.of(jane), Pageable.ofSize(10), 1);
+        when(employeeRepo.findAll(any(Specification.class), any(Pageable.class))).thenReturn(page);
+
+        PageDto<EmployeeDto> result = employeeService.getEmployees(1, null, null, null, 0, 10);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.content().get(0).fullName()).isEqualTo("Jane Doe");
+        assertThat(result.totalElements()).isEqualTo(1);
+        assertThat(result.page()).isEqualTo(0);
+        assertThat(result.size()).isEqualTo(10);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void getAllEmployeesAcrossFarms_returnsPagedResultAcrossFarms() {
+        Employee jane = new Employee();
+        jane.setId(1);
+        jane.setFarm(matunda);
+        jane.setFirstName("Jane");
+        jane.setLastName("Doe");
+        jane.setEmploymentType(EmploymentType.SALARIED);
+        jane.setStatus("ACTIVE");
+
+        Page<Employee> page = new PageImpl<>(List.of(jane), Pageable.ofSize(10), 42);
+        when(employeeRepo.findAll(any(Specification.class), any(Pageable.class))).thenReturn(page);
+
+        PageDto<EmployeeDto> result = employeeService.getAllEmployeesAcrossFarms(null, null, null, 0, 10);
+
+        assertThat(result.content()).hasSize(1);
+        assertThat(result.totalElements()).isEqualTo(42);
     }
 }

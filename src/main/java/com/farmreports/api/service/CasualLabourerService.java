@@ -4,6 +4,9 @@ import com.farmreports.api.dto.*;
 import com.farmreports.api.entity.*;
 import com.farmreports.api.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,6 +14,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.Base64;
 import java.util.List;
 
@@ -159,11 +163,22 @@ public class CasualLabourerService {
     }
 
     @Transactional(readOnly = true)
-    public List<CasualWorkSessionDto> getWorkSessions(Integer farmId) {
-        return workSessionRepository.findByFarmIdWithEntries(farmId)
-                .stream()
-                .map(this::toSessionDto)
-                .toList();
+    public PageDto<CasualWorkSessionDto> getWorkSessions(Integer farmId, Integer year, Integer month,
+                                                          int page, int size) {
+        Sort sort = Sort.by(Sort.Direction.DESC, "sessionDate");
+        PageRequest pageable = PageRequest.of(page, size, sort);
+
+        Page<CasualWorkSession> result;
+        if (year != null && month != null) {
+            YearMonth ym = YearMonth.of(year, month);
+            result = workSessionRepository.findByFarmIdAndSessionDateBetween(
+                    farmId, ym.atDay(1), ym.atEndOfMonth(), pageable);
+        } else {
+            result = workSessionRepository.findByFarmId(farmId, pageable);
+        }
+
+        List<CasualWorkSessionDto> content = result.getContent().stream().map(this::toSessionDto).toList();
+        return new PageDto<>(content, result.getTotalElements(), result.getTotalPages(), page, size);
     }
 
     @Transactional
