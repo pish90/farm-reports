@@ -82,6 +82,8 @@ public class ImportTemplateService {
                     "Herdsman", "2024-01-15", "1998-06-20", "12345678", "Female", "");
             writeExampleRow(sheet, 2, styles, farmName, "John", "Kiptoo", "0798765432", "CASUAL",
                     "General labour", "", "", "", "Male", "600");
+            writeExampleRow(sheet, 3, styles, farmName, "Mary", "Wanjiru", "0711223344", "BOTH",
+                    "Herdsman", "2023-03-01", "", "", "Female", "600");
 
             for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
             sheet.createFreezePane(0, 1);
@@ -90,10 +92,13 @@ public class ImportTemplateService {
             writeInstructions(notes, styles, "Employee import (CSV or XLSX)", List.of(
                     "Required columns: farmName, firstName, employmentType.",
                     "farmName must exactly match one of: " + farmNamesList() + ".",
-                    "employmentType must be SALARIED or CASUAL.",
+                    "employmentType must be SALARIED, CASUAL, or BOTH.",
                     "startDate and dateOfBirth must be in yyyy-MM-dd format, e.g. 2024-01-15.",
-                    "defaultDailyRate is only used for CASUAL employees; leave blank for SALARIED.",
-                    "Delete the two example rows on the first sheet before uploading your own data.",
+                    "defaultDailyRate is only used for CASUAL/BOTH employees; leave blank for SALARIED-only.",
+                    "A row that matches an existing employee's name but requests a type they don't already have " +
+                            "(e.g. adding CASUAL for someone already SALARIED) merges into that employee instead of " +
+                            "erroring — it doesn't need to repeat their other details.",
+                    "Delete the three example rows on the first sheet before uploading your own data.",
                     "Upload via ADMIN > Bulk Import > Employees. Either .csv or .xlsx is accepted."
             ));
 

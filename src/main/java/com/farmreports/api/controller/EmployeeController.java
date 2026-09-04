@@ -27,14 +27,15 @@ public class EmployeeController {
     @GetMapping
     public ApiResponse<PageDto<EmployeeDto>> getEmployees(
             @PathVariable Integer farmId,
-            @RequestParam(required = false) String employmentType,
+            @RequestParam(required = false) Boolean isSalaried,
+            @RequestParam(required = false) Boolean isCasual,
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             Authentication auth) {
         checkFarmAccess(farmId, auth);
-        return ApiResponse.ok(employeeService.getEmployees(farmId, employmentType, search, status, page, size));
+        return ApiResponse.ok(employeeService.getEmployees(farmId, isSalaried, isCasual, search, status, page, size));
     }
 
     @GetMapping("/{id}")

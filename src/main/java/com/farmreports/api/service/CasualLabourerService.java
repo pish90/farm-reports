@@ -38,7 +38,7 @@ public class CasualLabourerService {
     @Transactional(readOnly = true)
     public List<CasualLabourerDto> getActiveCasualLabourers(Integer farmId) {
         return employeeRepository
-                .findByFarmIdAndStatusAndEmploymentType(farmId, "ACTIVE", EmploymentType.CASUAL)
+                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE")
                 .stream()
                 .map(this::toDto)
                 .toList();
@@ -61,7 +61,8 @@ public class CasualLabourerService {
         employee.setFirstName(firstName);
         employee.setLastName(resolveLastName(request.firstName(), request.lastName(), request.name()));
         employee.setPhone(request.phone() != null && !request.phone().isBlank() ? request.phone().trim() : null);
-        employee.setEmploymentType(EmploymentType.CASUAL);
+        employee.setSalaried(false);
+        employee.setCasual(true);
         employee.setJobTitle(request.jobTitle());
         employee.setStartDate(request.startDate() != null ? LocalDate.parse(request.startDate()) : null);
         employee.setStatus("ACTIVE");
@@ -81,7 +82,7 @@ public class CasualLabourerService {
 
     @Transactional
     public CasualLabourerDto updateCasualLabourer(Integer farmId, Integer labourerId, CasualLabourerRequest request) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(labourerId, farmId, EmploymentType.CASUAL)
+        Employee employee = employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
 
         String firstName = resolveFirstName(request.firstName(), request.name());
@@ -106,7 +107,7 @@ public class CasualLabourerService {
 
     @Transactional
     public void deactivateCasualLabourer(Integer farmId, Integer labourerId) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(labourerId, farmId, EmploymentType.CASUAL)
+        Employee employee = employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
         employee.setStatus("INACTIVE");
     }
@@ -193,7 +194,7 @@ public class CasualLabourerService {
     @Transactional(readOnly = true)
     public List<CasualLabourerReportDto> getAllSummaries(Integer farmId) {
         List<Employee> labourers = employeeRepository
-                .findByFarmIdAndStatusAndEmploymentType(farmId, "ACTIVE", EmploymentType.CASUAL);
+                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE");
         List<CasualWorkSession> sessions = workSessionRepository.findByFarmIdWithEntries(farmId);
 
         return labourers.stream().map(l -> {
@@ -222,7 +223,7 @@ public class CasualLabourerService {
 
     @Transactional(readOnly = true)
     public EmployeeLedgerDto getLedger(Integer farmId, Integer labourerId, Integer year) {
-        employeeRepository.findByIdAndFarmIdAndEmploymentType(labourerId, farmId, EmploymentType.CASUAL)
+        employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
 
         LocalDate yearStart = LocalDate.of(year, 1, 1);
@@ -280,7 +281,7 @@ public class CasualLabourerService {
 
     @Transactional(readOnly = true)
     public CasualLabourerSummaryDto getSummary(Integer farmId, Integer labourerId) {
-        employeeRepository.findByIdAndFarmIdAndEmploymentType(labourerId, farmId, EmploymentType.CASUAL)
+        employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
 
         BigDecimal allTimeEarned = coalesce(workEntryRepository.sumEarnedByEmployeeId(labourerId));
@@ -301,8 +302,8 @@ public class CasualLabourerService {
     @Transactional
     public CasualLabourerPaymentDto recordPayment(Integer farmId, Integer labourerId,
                                                    RecordPaymentRequest request, String paidBy) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(
-                        labourerId, farmId, EmploymentType.CASUAL)
+        Employee employee = employeeRepository.findByIdAndFarmIdAndCasualTrue(
+                        labourerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
         Farm farm = farmRepository.getReferenceById(farmId);
 
@@ -345,7 +346,7 @@ public class CasualLabourerService {
     @Transactional(readOnly = true)
     public List<CasualPayrollEntryDto> getMonthlyPayroll(Integer farmId, Integer year, Integer month) {
         List<Employee> labourers = employeeRepository
-                .findByFarmIdAndStatusAndEmploymentType(farmId, "ACTIVE", EmploymentType.CASUAL);
+                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE");
 
         Integer reportId = getReportIdForMonth(farmId, year, month);
         var monthAttendance = reportId != null
@@ -380,7 +381,7 @@ public class CasualLabourerService {
     @Transactional(readOnly = true)
     public byte[] generateMonthlyExcel(Integer farmId, Integer year, Integer month) {
         List<Employee> labourers = employeeRepository
-                .findByFarmIdAndStatusAndEmploymentType(farmId, "ACTIVE", EmploymentType.CASUAL);
+                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE");
         List<CasualWorkSession> sessions = workSessionRepository.findByFarmIdWithEntries(farmId);
 
         List<ExportService.CasualLabourerRow> summaryRows = labourers.stream().map(l -> {

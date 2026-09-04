@@ -74,8 +74,8 @@ public class ReportService {
         attendanceRepository.deleteByReportId(reportId);
 
         List<Attendance> records = uniqueEntries.stream().map(e -> {
-            Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(
-                            e.workerId(), farmId, EmploymentType.SALARIED)
+            Employee employee = employeeRepository.findByIdAndFarmIdAndSalariedTrue(
+                            e.workerId(), farmId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "Worker not found: " + e.workerId()));
             Attendance a = new Attendance();
@@ -201,8 +201,8 @@ public class ReportService {
         casualAttendanceRepository.deleteByReportId(reportId);
 
         List<CasualAttendance> records = uniqueEntries.stream().map(e -> {
-            Employee labourer = employeeRepository.findByIdAndFarmIdAndEmploymentType(
-                            e.casualLabourerId(), farmId, EmploymentType.CASUAL)
+            Employee labourer = employeeRepository.findByIdAndFarmIdAndCasualTrue(
+                            e.casualLabourerId(), farmId)
                     .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
                             "Casual labourer not found: " + e.casualLabourerId()));
             CasualAttendance ca = new CasualAttendance();

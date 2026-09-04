@@ -54,9 +54,9 @@ public class EmployeeService {
     // ── Registry ──────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public PageDto<EmployeeDto> getEmployees(Integer farmId, String employmentType, String search,
+    public PageDto<EmployeeDto> getEmployees(Integer farmId, Boolean isSalaried, Boolean isCasual, String search,
                                               String status, int page, int size) {
-        Specification<Employee> spec = buildSpec(farmId, employmentType, search, status);
+        Specification<Employee> spec = buildSpec(farmId, isSalaried, isCasual, search, status);
         Sort sort = Sort.by(Sort.Direction.ASC, "firstName").and(Sort.by(Sort.Direction.ASC, "lastName"));
         return toPageDto(employeeRepo.findAll(spec, PageRequest.of(page, size, sort)));
     }
@@ -69,24 +69,26 @@ public class EmployeeService {
 
     /** ADMIN-only master registry: every employee across every farm. */
     @Transactional(readOnly = true)
-    public PageDto<EmployeeDto> getAllEmployeesAcrossFarms(Integer farmId, String employmentType, String search,
-                                                             int page, int size) {
-        Specification<Employee> spec = buildSpec(farmId, employmentType, search, null);
+    public PageDto<EmployeeDto> getAllEmployeesAcrossFarms(Integer farmId, Boolean isSalaried, Boolean isCasual,
+                                                             String search, int page, int size) {
+        Specification<Employee> spec = buildSpec(farmId, isSalaried, isCasual, search, null);
         Sort sort = Sort.by(Sort.Direction.ASC, "farm.name")
                 .and(Sort.by(Sort.Direction.ASC, "firstName"))
                 .and(Sort.by(Sort.Direction.ASC, "lastName"));
         return toPageDto(employeeRepo.findAll(spec, PageRequest.of(page, size, sort)));
     }
 
-    private static Specification<Employee> buildSpec(Integer farmId, String employmentType,
+    private static Specification<Employee> buildSpec(Integer farmId, Boolean isSalaried, Boolean isCasual,
                                                        String search, String status) {
         Specification<Employee> spec = Specification.where(null);
         if (farmId != null) {
             spec = spec.and((root, q, cb) -> cb.equal(root.get("farm").get("id"), farmId));
         }
-        if (employmentType != null && !employmentType.isBlank()) {
-            EmploymentType type = parseType(employmentType);
-            spec = spec.and((root, q, cb) -> cb.equal(root.get("employmentType"), type));
+        if (isSalaried != null) {
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("salaried"), isSalaried));
+        }
+        if (isCasual != null) {
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("casual"), isCasual));
         }
         if (status != null && !status.isBlank()) {
             spec = spec.and((root, q, cb) -> cb.equal(root.get("status"), status));
@@ -111,7 +113,7 @@ public class EmployeeService {
         Farm farm = farmRepo.findById(farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Farm not found"));
 
-        EmploymentType type = parseType(request.employmentType());
+        assertEmploymentTypeSelected(request.isSalaried(), request.isCasual());
 
         assertNotDuplicate(farm.getId(), farm.getName(), request.firstName(), request.lastName(), null);
 
@@ -122,7 +124,8 @@ public class EmployeeService {
         emp.setFirstName(request.firstName().trim());
         emp.setLastName(request.lastName() != null && !request.lastName().isBlank() ? request.lastName().trim() : null);
         emp.setPhone(request.phone() != null && !request.phone().isBlank() ? request.phone().trim() : null);
-        emp.setEmploymentType(type);
+        emp.setSalaried(request.isSalaried());
+        emp.setCasual(request.isCasual());
         emp.setJobTitle(request.jobTitle() != null && !request.jobTitle().isBlank() ? request.jobTitle().trim() : null);
         emp.setNationalId(request.nationalId() != null && !request.nationalId().isBlank() ? request.nationalId().trim() : null);
         emp.setGender(request.gender() != null && !request.gender().isBlank() ? request.gender().trim() : null);
@@ -277,21 +280,23 @@ public class EmployeeService {
         }
     }
 
-    /** Shared validate-all-then-insert-all logic used by both the CSV and XLSX importers. */
+    /**
+     * Shared validate-all-then-apply-all logic used by both the CSV and XLSX importers. A row
+     * whose (farm, first name, last name) matches an existing employee — or an earlier row in
+     * the same file — but requests an employment type they don't already have merges into that
+     * employee (OR's the flag in) instead of erroring; only a row that adds nothing new is a
+     * real duplicate error.
+     */
     private EmployeeCsvImportResult runImport(List<Map<String, String>> rows) {
         Map<String, Farm> farmsByName = farmRepo.findAll().stream()
                 .collect(Collectors.toMap(f -> f.getName().trim().toLowerCase(), f -> f, (a, b) -> a));
 
-        // Employees are identified for dedup purposes by (farm, first name, last name) since
-        // employeeId/lsNumber are generated at insert time and can't be used to spot duplicates
-        // in an incoming file. Checked against both the DB and earlier rows in this same file.
-        Set<String> existingKeys = employeeRepo.findAll().stream()
-                .map(e -> dedupeKey(e.getFarm().getId(), e.getFirstName(), e.getLastName()))
-                .collect(Collectors.toSet());
-        Set<String> seenInFile = new java.util.HashSet<>();
+        Map<String, Employee> existingByKey = employeeRepo.findAll().stream()
+                .collect(Collectors.toMap(e -> dedupeKey(e.getFarm().getId(), e.getFirstName(), e.getLastName()),
+                        e -> e, (a, b) -> a));
 
         List<EmployeeCsvRowError> errors = new ArrayList<>();
-        List<ValidImportRow> validRows = new ArrayList<>();
+        Map<String, PendingEmployee> pendingByKey = new LinkedHashMap<>();
         int rowNum = 1;
         for (Map<String, String> fields : rows) {
             rowNum++;
@@ -321,25 +326,16 @@ public class EmployeeService {
 
             if (firstName == null) {
                 issues.add("First name is required");
-            } else if (farm != null) {
-                String key = dedupeKey(farm.getId(), firstName, lastName);
-                if (existingKeys.contains(key)) {
-                    issues.add("Employee already exists on " + farm.getName() + ": "
-                            + firstName + (lastName != null ? " " + lastName : ""));
-                } else if (!seenInFile.add(key)) {
-                    issues.add("Duplicate row in file: " + firstName + (lastName != null ? " " + lastName : "")
-                            + " on " + farm.getName() + " appears more than once");
-                }
             }
 
-            EmploymentType employmentType = null;
+            EmploymentFlags flags = null;
             if (employmentTypeRaw == null) {
                 issues.add("Employment type is required");
             } else {
                 try {
-                    employmentType = EmploymentType.valueOf(employmentTypeRaw.toUpperCase());
+                    flags = parseEmploymentFlags(employmentTypeRaw);
                 } catch (IllegalArgumentException e) {
-                    issues.add("Invalid employmentType '" + employmentTypeRaw + "' (must be SALARIED or CASUAL)");
+                    issues.add("Invalid employmentType '" + employmentTypeRaw + "' (must be SALARIED, CASUAL, or BOTH)");
                 }
             }
 
@@ -376,26 +372,87 @@ public class EmployeeService {
                 continue;
             }
 
-            EmployeeRequest request = new EmployeeRequest(
-                    firstName, lastName, phone, employmentType.name(), jobTitle,
-                    null, startDate, dateOfBirth, nationalId, gender,
-                    defaultDailyRate, null, null, null);
-            validRows.add(new ValidImportRow(farm.getId(), request));
+            String key = dedupeKey(farm.getId(), firstName, lastName);
+            Employee existing = existingByKey.get(key);
+            PendingEmployee pending = pendingByKey.get(key);
+            boolean addsSalaried = flags.salaried() && !(existing != null && existing.isSalaried())
+                    && !(pending != null && pending.salaried);
+            boolean addsCasual = flags.casual() && !(existing != null && existing.isCasual())
+                    && !(pending != null && pending.casual);
+
+            if (!addsSalaried && !addsCasual) {
+                String message = existing != null
+                        ? "Employee already exists on " + farm.getName() + ": "
+                                + firstName + (lastName != null ? " " + lastName : "")
+                        : "Duplicate row in file: " + firstName + (lastName != null ? " " + lastName : "")
+                                + " on " + farm.getName() + " appears more than once";
+                errors.add(new EmployeeCsvRowError(rowNum, rowSummary, message));
+                continue;
+            }
+
+            if (pending == null) {
+                pending = new PendingEmployee(existing, farm, firstName, lastName);
+                pendingByKey.put(key, pending);
+            }
+            pending.salaried = pending.salaried || flags.salaried();
+            pending.casual = pending.casual || flags.casual();
+            // Non-identity fields: the last row in the file for this person wins.
+            pending.phone = phone;
+            pending.jobTitle = jobTitle;
+            pending.startDate = startDate;
+            pending.dateOfBirth = dateOfBirth;
+            pending.nationalId = nationalId;
+            pending.gender = gender;
+            pending.defaultDailyRate = defaultDailyRate;
         }
 
         if (!errors.isEmpty()) {
-            return new EmployeeCsvImportResult(false, rows.size(), 0, errors);
+            return new EmployeeCsvImportResult(false, rows.size(), 0, 0, errors);
         }
 
         int imported = 0;
-        for (ValidImportRow row : validRows) {
-            createEmployee(row.farmId(), row.request());
-            imported++;
+        int merged = 0;
+        for (PendingEmployee pending : pendingByKey.values()) {
+            if (pending.existing == null) {
+                EmployeeRequest request = new EmployeeRequest(
+                        pending.firstName, pending.lastName, pending.phone, pending.salaried, pending.casual,
+                        pending.jobTitle, null, pending.startDate, pending.dateOfBirth, pending.nationalId,
+                        pending.gender, pending.defaultDailyRate, null, null, null);
+                createEmployee(pending.farm.getId(), request);
+                imported++;
+            } else {
+                pending.existing.setSalaried(pending.existing.isSalaried() || pending.salaried);
+                pending.existing.setCasual(pending.existing.isCasual() || pending.casual);
+                employeeRepo.save(pending.existing);
+                merged++;
+            }
         }
-        return new EmployeeCsvImportResult(true, rows.size(), imported, List.of());
+        return new EmployeeCsvImportResult(true, rows.size(), imported, merged, List.of());
     }
 
-    private record ValidImportRow(Integer farmId, EmployeeRequest request) {}
+    /** Accumulates one file's rows for a single (farm, name) identity across possibly multiple rows. */
+    private static final class PendingEmployee {
+        final Employee existing;
+        final Farm farm;
+        final String firstName;
+        final String lastName;
+        boolean salaried;
+        boolean casual;
+        String phone;
+        String jobTitle;
+        String startDate;
+        String dateOfBirth;
+        String nationalId;
+        String gender;
+        BigDecimal defaultDailyRate;
+
+        PendingEmployee(Employee existing, Farm farm, String firstName, String lastName) {
+            this.existing = existing;
+            this.farm = farm;
+            this.firstName = firstName;
+            this.lastName = lastName;
+        }
+    }
 
     private static String normalizeHeader(String s) {
         return s.toLowerCase().replaceAll("[^a-z0-9]", "");
@@ -452,10 +509,13 @@ public class EmployeeService {
         Employee emp = findOrThrow(farmId, id);
 
         assertNotDuplicate(farmId, emp.getFarm().getName(), request.firstName(), request.lastName(), id);
+        assertEmploymentTypeSelected(request.isSalaried(), request.isCasual());
 
         emp.setFirstName(request.firstName().trim());
         emp.setLastName(request.lastName() != null && !request.lastName().isBlank() ? request.lastName().trim() : null);
         emp.setPhone(request.phone() != null && !request.phone().isBlank() ? request.phone().trim() : null);
+        emp.setSalaried(request.isSalaried());
+        emp.setCasual(request.isCasual());
         emp.setJobTitle(request.jobTitle() != null && !request.jobTitle().isBlank() ? request.jobTitle().trim() : null);
         emp.setNationalId(request.nationalId() != null && !request.nationalId().isBlank() ? request.nationalId().trim() : null);
         emp.setGender(request.gender() != null && !request.gender().isBlank() ? request.gender().trim() : null);
@@ -610,13 +670,24 @@ public class EmployeeService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
     }
 
-    private static EmploymentType parseType(String s) {
-        try {
-            return EmploymentType.valueOf(s.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid employmentType: " + s);
+    private static void assertEmploymentTypeSelected(boolean isSalaried, boolean isCasual) {
+        if (!isSalaried && !isCasual) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Employee must be salaried, casual, or both");
         }
     }
+
+    /** Parses the import file's single employmentType column value into the two flags. */
+    private static EmploymentFlags parseEmploymentFlags(String raw) {
+        return switch (raw.toUpperCase()) {
+            case "SALARIED" -> new EmploymentFlags(true, false);
+            case "CASUAL" -> new EmploymentFlags(false, true);
+            case "BOTH" -> new EmploymentFlags(true, true);
+            default -> throw new IllegalArgumentException("Invalid employmentType: " + raw);
+        };
+    }
+
+    private record EmploymentFlags(boolean salaried, boolean casual) {}
 
     private static LocalDate parseDate(String s) {
         if (s == null || s.isBlank()) return null;
@@ -649,7 +720,8 @@ public class EmployeeService {
                 e.getLastName(),
                 e.getFullName(),
                 e.getPhone(),
-                e.getEmploymentType().name(),
+                e.isSalaried(),
+                e.isCasual(),
                 e.getJobTitle(),
                 e.getDepartment() != null ? e.getDepartment().getName() : null,
                 e.getStartDate() != null ? e.getStartDate().toString() : null,

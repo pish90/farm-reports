@@ -66,13 +66,14 @@ public class AdminController {
     @GetMapping("/employees")
     public ApiResponse<PageDto<EmployeeDto>> getMasterEmployeeRegistry(
             @RequestParam(required = false) Integer farmId,
-            @RequestParam(required = false) String employmentType,
+            @RequestParam(required = false) Boolean isSalaried,
+            @RequestParam(required = false) Boolean isCasual,
             @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             Authentication auth) {
         requireAdmin(auth);
-        return ApiResponse.ok(employeeService.getAllEmployeesAcrossFarms(farmId, employmentType, search, page, size));
+        return ApiResponse.ok(employeeService.getAllEmployeesAcrossFarms(farmId, isSalaried, isCasual, search, page, size));
     }
 
     @PostMapping(value = "/employees/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

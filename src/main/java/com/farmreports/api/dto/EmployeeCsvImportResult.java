@@ -6,5 +6,6 @@ public record EmployeeCsvImportResult(
         boolean success,
         int totalRows,
         int importedCount,
+        int mergedCount,
         List<EmployeeCsvRowError> errors
 ) {}

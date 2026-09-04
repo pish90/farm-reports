@@ -4,7 +4,6 @@ import com.farmreports.api.dto.PayrollEntryRequest;
 import com.farmreports.api.dto.PayrollRecordDto;
 import com.farmreports.api.dto.PayrollSummaryDto;
 import com.farmreports.api.entity.Employee;
-import com.farmreports.api.entity.EmploymentType;
 import com.farmreports.api.entity.PayrollEntry;
 import com.farmreports.api.repository.EmployeeRepository;
 import com.farmreports.api.repository.MonthlyReportRepository;
@@ -62,8 +61,8 @@ public class PayrollService {
                 return e;
             }).toList();
         } else {
-            List<Employee> employees = employeeRepo.findByFarmIdAndStatusAndEmploymentType(
-                    farmId, "ACTIVE", EmploymentType.SALARIED);
+            List<Employee> employees = employeeRepo.findByFarmIdAndStatusAndSalariedTrue(
+                    farmId, "ACTIVE");
             seeded = employees.stream().map(emp -> {
                 PayrollEntry e = new PayrollEntry();
                 e.setFarmId(farmId);

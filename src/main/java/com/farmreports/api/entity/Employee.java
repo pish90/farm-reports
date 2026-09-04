@@ -37,9 +37,11 @@ public class Employee {
     @Column(length = 50)
     private String phone;
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "employment_type", nullable = false, length = 20)
-    private EmploymentType employmentType;
+    @Column(name = "is_salaried", nullable = false)
+    private boolean salaried;
+
+    @Column(name = "is_casual", nullable = false)
+    private boolean casual;
 
     @Column(name = "job_title", length = 100)
     private String jobTitle;

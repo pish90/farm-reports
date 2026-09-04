@@ -307,6 +307,8 @@ table input, table select {
 .badge.draft { background: #fdf0d5; color: #8a5a00; }
 .badge.submitted { background: #dcf5e6; color: #17703f; }
 .badge.not-started { background: #eceff3; color: var(--text-dim); }
+.badge.salaried { background: #e8f5ef; color: #2d6a4f; }
+.badge.casual { background: #f3e8ff; color: #7c3aed; }
 
 .stat-grid {
   display: grid;

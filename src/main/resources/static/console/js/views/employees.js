@@ -40,6 +40,7 @@ export async function render(container) {
           <option value="">All types</option>
           <option value="SALARIED">Salaried</option>
           <option value="CASUAL">Casual</option>
+          <option value="BOTH">Salaried + Casual</option>
         </select>
         <input id="search" type="search" placeholder="Search name, LS number, phone…" style="min-width:220px">
         <span class="text-dim" id="result-count"></span>
@@ -64,7 +65,9 @@ export async function render(container) {
   function draw() {
     const filtered = allEmployees.filter((e) => {
       if (farmFilter && String(e.farmId) !== farmFilter) return false;
-      if (typeFilter && e.employmentType !== typeFilter) return false;
+      if (typeFilter === 'SALARIED' && !(e.isSalaried && !e.isCasual)) return false;
+      if (typeFilter === 'CASUAL' && !(e.isCasual && !e.isSalaried)) return false;
+      if (typeFilter === 'BOTH' && !(e.isSalaried && e.isCasual)) return false;
       if (searchTerm) {
         const hay = `${e.fullName} ${e.lsNumber} ${e.phone}`.toLowerCase();
         if (!hay.includes(searchTerm.toLowerCase())) return false;
@@ -77,7 +80,7 @@ export async function render(container) {
         <td class="mono">${escapeHtml(e.lsNumber || '—')}</td>
         <td>${escapeHtml(e.fullName)}</td>
         ${canSeeAllFarms() ? `<td>${escapeHtml(e.farmName)}</td>` : ''}
-        <td>${escapeHtml(e.employmentType)}</td>
+        <td>${employmentTypeBadges(e)}</td>
         <td>${escapeHtml(e.jobTitle || '—')}</td>
         <td>${escapeHtml(e.phone || '—')}</td>
         <td>${escapeHtml(e.status || '—')}</td>
@@ -106,10 +109,18 @@ export async function render(container) {
   draw();
 }
 
+function employmentTypeBadges(e) {
+  const badges = [];
+  if (e.isSalaried) badges.push('<span class="badge salaried">Salaried</span>');
+  if (e.isCasual) badges.push('<span class="badge casual">Casual</span>');
+  return badges.join(' ') || '—';
+}
+
 function downloadCsvTemplate() {
   const header = 'farmName,firstName,lastName,phone,employmentType,jobTitle,startDate,defaultDailyRate';
   const example = 'Matunda,Jane,Doe,0712345678,SALARIED,Herdsman,2024-01-15,';
-  const csv = '﻿' + header + '\n' + example + '\n';
+  const example2 = 'Matunda,Mary,Wanjiru,0711223344,BOTH,Herdsman,2023-03-01,600';
+  const csv = '﻿' + header + '\n' + example + '\n' + example2 + '\n';
   const blob = new Blob([csv], { type: 'text/csv' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -126,8 +137,12 @@ function openImportCsvModal() {
     <h3>Import employees from CSV</h3>
     <p class="text-dim">
       Columns: <strong>farmName</strong>, <strong>firstName</strong>, lastName, phone,
-      <strong>employmentType</strong> (SALARIED or CASUAL), jobTitle, startDate (yyyy-mm-dd), defaultDailyRate.
+      <strong>employmentType</strong> (SALARIED, CASUAL, or BOTH), jobTitle, startDate (yyyy-mm-dd), defaultDailyRate.
       Bold columns are required.
+    </p>
+    <p class="text-dim">
+      A row that matches an existing employee's name but requests a type they don't already have
+      (e.g. adding CASUAL for someone already SALARIED) merges into that employee instead of erroring.
     </p>
     <p><button type="button" class="secondary" id="download-template">Download CSV template</button></p>
     <form id="csv-import-form">
@@ -154,7 +169,8 @@ function openImportCsvModal() {
     try {
       const result = await api.postForm('/admin/employees/import', fd);
       if (result.success) {
-        showToast(`Imported ${result.importedCount} employee(s)`, 'success');
+        const mergeNote = result.mergedCount ? `, merged ${result.mergedCount} existing employee(s)` : '';
+        showToast(`Imported ${result.importedCount} employee(s)${mergeNote}`, 'success');
         close();
         render(document.getElementById('view-container'));
       } else {
@@ -196,11 +212,15 @@ async function openEmployeeModal(employee, forcedFarmId) {
 
   let summary = null;
   let ledger = null;
+  let casualLedger = null;
   const ledgerYear = new Date().getFullYear();
   if (!isNew) {
     summary = await api.get(`/farms/${farmId}/employees/${employee.id}/summary`).catch(() => null);
-    if (employee.employmentType === 'SALARIED') {
+    if (employee.isSalaried) {
       ledger = await api.get(`/farms/${farmId}/employees/${employee.id}/ledger?year=${ledgerYear}`).catch(() => null);
+    }
+    if (employee.isCasual) {
+      casualLedger = await api.get(`/farms/${farmId}/casual-labourers/${employee.id}/ledger?year=${ledgerYear}`).catch(() => null);
     }
   }
 
@@ -213,10 +233,14 @@ async function openEmployeeModal(employee, forcedFarmId) {
         <div><label>Last name</label><input name="lastName" value="${escapeHtml(employee?.lastName || '')}"></div>
         <div><label>Phone</label><input name="phone" value="${escapeHtml(employee?.phone || '')}"></div>
         <div><label>Employment type</label>
-          <select name="employmentType" required>
-            <option value="SALARIED" ${employee?.employmentType === 'SALARIED' ? 'selected' : ''}>Salaried</option>
-            <option value="CASUAL" ${employee?.employmentType === 'CASUAL' ? 'selected' : ''}>Casual</option>
-          </select>
+          <div style="display:flex;gap:1rem;align-items:center;height:2.25rem">
+            <label style="display:flex;gap:0.35rem;align-items:center;font-weight:normal">
+              <input type="checkbox" name="isSalaried" ${(!employee || employee.isSalaried) ? 'checked' : ''}> Salaried
+            </label>
+            <label style="display:flex;gap:0.35rem;align-items:center;font-weight:normal">
+              <input type="checkbox" name="isCasual" ${employee?.isCasual ? 'checked' : ''}> Casual
+            </label>
+          </div>
         </div>
         <div><label>Job title</label><input name="jobTitle" value="${escapeHtml(employee?.jobTitle || '')}"></div>
         <div><label>Department</label><select name="departmentId"><option value="">—</option>${deptOptions}</select></div>
@@ -243,7 +267,8 @@ async function openEmployeeModal(employee, forcedFarmId) {
         <button type="submit">${isNew ? 'Create' : 'Save changes'}</button>
       </div>
     </form>
-    ${ledger ? renderLedgerSection(ledger) : ''}
+    ${ledger ? renderLedgerSection(ledger, 'salaried', 'Annual Ledger (Salaried)') : ''}
+    ${casualLedger ? renderLedgerSection(casualLedger, 'casual', 'Annual Ledger (Casual)') : ''}
     ${summary ? renderSummarySection(summary) : ''}
   `);
 
@@ -251,11 +276,18 @@ async function openEmployeeModal(employee, forcedFarmId) {
   modal.querySelector('#employee-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const isSalaried = fd.get('isSalaried') === 'on';
+    const isCasual = fd.get('isCasual') === 'on';
+    if (!isSalaried && !isCasual) {
+      showToast('Employee must be salaried, casual, or both', 'error');
+      return;
+    }
     const payload = {
       firstName: fd.get('firstName'),
       lastName: fd.get('lastName') || null,
       phone: fd.get('phone') || null,
-      employmentType: fd.get('employmentType'),
+      isSalaried,
+      isCasual,
       jobTitle: fd.get('jobTitle') || null,
       departmentId: fd.get('departmentId') ? Number(fd.get('departmentId')) : null,
       startDate: fd.get('startDate') || null,
@@ -281,19 +313,20 @@ async function openEmployeeModal(employee, forcedFarmId) {
   });
 
   if (summary) wireSummarySection(modal, farmId, employee.id, summary);
-  if (ledger) wireLedgerSection(modal, farmId, employee.id);
+  if (ledger) wireLedgerSection(modal, farmId, employee.id, 'salaried');
+  if (casualLedger) wireLedgerSection(modal, farmId, employee.id, 'casual');
 }
 
-function renderLedgerSection(ledger) {
+function renderLedgerSection(ledger, kind, title) {
   const now = new Date();
   const yearOptions = Array.from({ length: 6 }, (_, i) => now.getFullYear() - i)
     .map((y) => `<option value="${y}" ${y === ledger.year ? 'selected' : ''}>${y}</option>`).join('');
   return `
     <div class="section-title" style="margin-top:1.5rem">
-      <h4 style="margin:0">Annual Ledger</h4>
-      <select id="ledger-year">${yearOptions}</select>
+      <h4 style="margin:0">${escapeHtml(title)}</h4>
+      <select id="ledger-year-${kind}">${yearOptions}</select>
     </div>
-    <div id="ledger-content">${renderLedgerContent(ledger)}</div>
+    <div id="ledger-content-${kind}">${renderLedgerContent(ledger)}</div>
   `;
 }
 
@@ -321,12 +354,15 @@ function renderLedgerContent(ledger) {
   `;
 }
 
-function wireLedgerSection(modal, farmId, employeeId) {
-  modal.querySelector('#ledger-year').addEventListener('change', async (e) => {
+function wireLedgerSection(modal, farmId, employeeId, kind) {
+  const ledgerPath = kind === 'casual'
+    ? `/farms/${farmId}/casual-labourers/${employeeId}/ledger`
+    : `/farms/${farmId}/employees/${employeeId}/ledger`;
+  modal.querySelector(`#ledger-year-${kind}`).addEventListener('change', async (e) => {
     const year = Number(e.target.value);
-    const content = modal.querySelector('#ledger-content');
+    const content = modal.querySelector(`#ledger-content-${kind}`);
     content.innerHTML = `<div class="empty-state">Loading…</div>`;
-    const newLedger = await api.get(`/farms/${farmId}/employees/${employeeId}/ledger?year=${year}`).catch(() => null);
+    const newLedger = await api.get(`${ledgerPath}?year=${year}`).catch(() => null);
     content.innerHTML = newLedger ? renderLedgerContent(newLedger) : '<div class="empty-state">Failed to load ledger</div>';
   });
 }

@@ -29,7 +29,7 @@ public class FarmService {
     @Transactional(readOnly = true)
     public List<WorkerDto> getActiveWorkers(Integer farmId) {
         return employeeRepository
-                .findByFarmIdAndStatusAndEmploymentType(farmId, "ACTIVE", EmploymentType.SALARIED)
+                .findByFarmIdAndStatusAndSalariedTrue(farmId, "ACTIVE")
                 .stream()
                 .map(this::toWorkerDto)
                 .toList();
@@ -52,7 +52,8 @@ public class FarmService {
         employee.setFirstName(firstName);
         employee.setLastName(resolveLastName(request.firstName(), request.lastName(), request.name()));
         employee.setPhone(request.phone() != null ? request.phone().trim() : null);
-        employee.setEmploymentType(EmploymentType.SALARIED);
+        employee.setSalaried(true);
+        employee.setCasual(false);
         employee.setJobTitle(request.jobTitle());
         employee.setStartDate(request.startDate() != null ? LocalDate.parse(request.startDate()) : null);
         if (request.departmentId() != null) {
@@ -66,7 +67,7 @@ public class FarmService {
 
     @Transactional
     public WorkerDto updateWorker(Integer farmId, Integer workerId, WorkerRequest request) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(workerId, farmId, EmploymentType.SALARIED)
+        Employee employee = employeeRepository.findByIdAndFarmIdAndSalariedTrue(workerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Worker not found"));
 
         String firstName = resolveFirstName(request.firstName(), request.name());
@@ -85,7 +86,7 @@ public class FarmService {
 
     @Transactional
     public void deactivateWorker(Integer farmId, Integer workerId) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndEmploymentType(workerId, farmId, EmploymentType.SALARIED)
+        Employee employee = employeeRepository.findByIdAndFarmIdAndSalariedTrue(workerId, farmId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Worker not found"));
         employee.setStatus("INACTIVE");
     }

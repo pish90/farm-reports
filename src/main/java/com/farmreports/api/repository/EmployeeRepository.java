@@ -1,7 +1,6 @@
 package com.farmreports.api.repository;
 
 import com.farmreports.api.entity.Employee;
-import com.farmreports.api.entity.EmploymentType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -11,16 +10,20 @@ import java.util.Optional;
 
 public interface EmployeeRepository extends JpaRepository<Employee, Integer>, JpaSpecificationExecutor<Employee> {
 
-    List<Employee> findByFarmIdAndStatusAndEmploymentType(Integer farmId, String status, EmploymentType type);
+    List<Employee> findByFarmIdAndStatusAndSalariedTrue(Integer farmId, String status);
+
+    List<Employee> findByFarmIdAndStatusAndCasualTrue(Integer farmId, String status);
 
     @Query("SELECT e FROM Employee e ORDER BY e.farm.name, e.firstName, e.lastName")
     List<Employee> findAllOrderByFarmAndName();
 
     Optional<Employee> findByIdAndFarmId(Integer id, Integer farmId);
 
-    Optional<Employee> findByIdAndFarmIdAndEmploymentType(Integer id, Integer farmId, EmploymentType type);
+    Optional<Employee> findByIdAndFarmIdAndSalariedTrue(Integer id, Integer farmId);
 
-    long countByFarmIdAndStatusAndEmploymentType(Integer farmId, String status, EmploymentType type);
+    Optional<Employee> findByIdAndFarmIdAndCasualTrue(Integer id, Integer farmId);
+
+    long countByFarmIdAndStatusAndSalariedTrue(Integer farmId, String status);
 
     /** Case/whitespace-insensitive match on (farm, first name, last name); excludeId skips the row being updated. */
     @Query("SELECT COUNT(e) > 0 FROM Employee e WHERE e.farm.id = :farmId " +

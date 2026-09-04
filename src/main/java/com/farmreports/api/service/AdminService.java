@@ -75,8 +75,8 @@ public class AdminService {
 
             BigDecimal milk = milkRepository.sumLitresByFarmAndYearAndMonth(farm.getId(), year, month);
             BigDecimal expenses = expenseRepository.sumCostByFarmAndYearAndMonth(farm.getId(), year, month);
-            long activeWorkers = employeeRepository.countByFarmIdAndStatusAndEmploymentType(
-                    farm.getId(), "ACTIVE", EmploymentType.SALARIED);
+            long activeWorkers = employeeRepository.countByFarmIdAndStatusAndSalariedTrue(
+                    farm.getId(), "ACTIVE");
 
             return new FarmLiveStatusDto(
                     farm.getId(), farm.getName(), year, month,

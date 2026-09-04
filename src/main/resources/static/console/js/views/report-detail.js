@@ -89,7 +89,7 @@ async function renderTab(container, state, reload) {
 // ── Attendance ──────────────────────────────────────────────────────────────
 
 async function renderAttendance(container, state, reload, locked) {
-  const workers = await api.get(`/farms/${state.farmId}/employees?employmentType=SALARIED`);
+  const workers = await api.get(`/farms/${state.farmId}/employees?isSalaried=true`);
   const days = daysInMonth(state.report.year, state.report.month);
   const byWorkerDay = new Map();
   for (const a of state.report.attendance || []) byWorkerDay.set(`${a.workerId}-${a.dayOfMonth}`, a.status || (a.present ? 'P' : 'A'));
