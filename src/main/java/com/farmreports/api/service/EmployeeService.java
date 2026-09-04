@@ -484,6 +484,44 @@ public class EmployeeService {
         return toDto(employeeRepo.save(emp));
     }
 
+    @Transactional
+    public EmployeeDto deactivateEmployee(Integer farmId, Integer id) {
+        Employee emp = findOrThrow(farmId, id);
+        emp.setStatus("INACTIVE");
+        return toDto(employeeRepo.save(emp));
+    }
+
+    private static final String HISTORY_CHECK_SQL = """
+            SELECT
+              EXISTS(SELECT 1 FROM attendance WHERE worker_id = ?) OR
+              EXISTS(SELECT 1 FROM attendance_worker_notes WHERE worker_id = ?) OR
+              EXISTS(SELECT 1 FROM casual_attendance WHERE casual_labourer_id = ?) OR
+              EXISTS(SELECT 1 FROM casual_work_entries WHERE casual_labourer_id = ?) OR
+              EXISTS(SELECT 1 FROM casual_labourer_payments WHERE casual_labourer_id = ?) OR
+              EXISTS(SELECT 1 FROM payroll_entries WHERE employee_id = ?) OR
+              EXISTS(SELECT 1 FROM employee_payments WHERE employee_id = ?)
+            """;
+
+    /**
+     * Hard-deletes an employee — only when they have zero recorded history (attendance,
+     * payroll, casual work, payments). Every one of those tables has a FK straight to
+     * employees(id) with no cascade, so a real hard delete of an employee with history
+     * would fail at the DB level anyway; this checks up front to give a clear error
+     * instead. Employees who've actually worked should be deactivated, not deleted.
+     */
+    @Transactional
+    public void deleteEmployee(Integer farmId, Integer id) {
+        Employee emp = findOrThrow(farmId, id);
+        Integer eid = emp.getId();
+        Boolean hasHistory = jdbc.queryForObject(HISTORY_CHECK_SQL, Boolean.class,
+                eid, eid, eid, eid, eid, eid, eid);
+        if (Boolean.TRUE.equals(hasHistory)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    emp.getFullName() + " has recorded attendance, payroll, or payment history and can't be deleted — deactivate them instead.");
+        }
+        employeeRepo.delete(emp);
+    }
+
     // ── Salaried payments ─────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)

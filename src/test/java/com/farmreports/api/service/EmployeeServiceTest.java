@@ -256,4 +256,55 @@ class EmployeeServiceTest {
         assertThat(result.content()).hasSize(1);
         assertThat(result.totalElements()).isEqualTo(42);
     }
+
+    @Test
+    void deactivateEmployee_setsStatusInactive() {
+        Employee jane = new Employee();
+        jane.setId(1);
+        jane.setFarm(matunda);
+        jane.setFirstName("Jane");
+        jane.setLastName("Doe");
+        jane.setEmploymentType(EmploymentType.SALARIED);
+        jane.setStatus("ACTIVE");
+        when(employeeRepo.findByIdAndFarmId(1, 1)).thenReturn(Optional.of(jane));
+        when(employeeRepo.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        EmployeeDto result = employeeService.deactivateEmployee(1, 1);
+
+        assertThat(result.status()).isEqualTo("INACTIVE");
+    }
+
+    @Test
+    void deleteEmployee_withHistory_throwsConflictAndDoesNotDelete() {
+        Employee jane = new Employee();
+        jane.setId(1);
+        jane.setFarm(matunda);
+        jane.setFirstName("Jane");
+        jane.setLastName("Doe");
+        when(employeeRepo.findByIdAndFarmId(1, 1)).thenReturn(Optional.of(jane));
+        when(jdbc.queryForObject(anyString(), eq(Boolean.class), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(true);
+
+        assertThatThrownBy(() -> employeeService.deleteEmployee(1, 1))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("deactivate");
+
+        verify(employeeRepo, never()).delete(any(Employee.class));
+    }
+
+    @Test
+    void deleteEmployee_noHistory_deletes() {
+        Employee jane = new Employee();
+        jane.setId(1);
+        jane.setFarm(matunda);
+        jane.setFirstName("Jane");
+        jane.setLastName("Doe");
+        when(employeeRepo.findByIdAndFarmId(1, 1)).thenReturn(Optional.of(jane));
+        when(jdbc.queryForObject(anyString(), eq(Boolean.class), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(false);
+
+        employeeService.deleteEmployee(1, 1);
+
+        verify(employeeRepo).delete(jane);
+    }
 }

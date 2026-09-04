@@ -76,6 +76,36 @@ public class EmployeeController {
         return ApiResponse.ok(employee);
     }
 
+    @PutMapping("/{id}/deactivate")
+    public ApiResponse<EmployeeDto> deactivateEmployee(
+            @PathVariable Integer farmId,
+            @PathVariable Integer id,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        EmployeeDto employee = employeeService.deactivateEmployee(farmId, id);
+        auditService.log(AuditAction.EMPLOYEE_DEACTIVATED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "Employee", String.valueOf(employee.id()),
+                "Employee deactivated: " + employee.fullName() + " (" + employee.lsNumber() + ")");
+        return ApiResponse.ok(employee);
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteEmployee(
+            @PathVariable Integer farmId,
+            @PathVariable Integer id,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        requireAdmin(auth);
+        EmployeeDto employee = employeeService.getEmployee(farmId, id);
+        employeeService.deleteEmployee(farmId, id);
+        auditService.log(AuditAction.EMPLOYEE_DELETED, auth,
+                farmId, ClaimsHelper.getFarmName(auth),
+                "Employee", String.valueOf(id),
+                "Employee deleted: " + employee.fullName() + " (" + employee.lsNumber() + ")");
+    }
+
     // ── Payments (salaried) ───────────────────────────────────────────────────
 
     @GetMapping("/{id}/summary")
@@ -133,6 +163,12 @@ public class EmployeeController {
         if ("ADMIN".equals(ClaimsHelper.getRole(auth))) return;
         if (!farmId.equals(ClaimsHelper.getFarmId(auth))) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
+    }
+
+    private void requireAdmin(Authentication auth) {
+        if (!"ADMIN".equals(ClaimsHelper.getRole(auth))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Admin access required to delete an employee");
         }
     }
 }
