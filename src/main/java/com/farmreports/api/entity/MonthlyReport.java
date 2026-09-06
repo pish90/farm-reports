@@ -48,9 +48,6 @@ public class MonthlyReport extends AuditBase {
     private LocalDateTime submittedAt;
 
     @OneToMany(mappedBy = "report", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Attendance> attendance = new ArrayList<>();
-
-    @OneToMany(mappedBy = "report", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<LivestockReturn> livestockReturns = new ArrayList<>();
 
     @OneToMany(mappedBy = "report", cascade = CascadeType.ALL, orphanRemoval = true)

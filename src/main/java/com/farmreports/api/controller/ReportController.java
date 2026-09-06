@@ -54,19 +54,6 @@ public class ReportController {
         return ApiResponse.ok(report);
     }
 
-    @PutMapping("/{id}/attendance")
-    public ApiResponse<Void> upsertAttendance(
-            @PathVariable Integer id,
-            @Valid @RequestBody List<@Valid AttendanceEntryRequest> entries,
-            Authentication auth) {
-        reportService.upsertAttendance(id, ClaimsHelper.getFarmId(auth), entries);
-        auditService.log(AuditAction.ATTENDANCE_UPDATED, auth,
-                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
-                "MonthlyReport", String.valueOf(id),
-                "Attendance updated (" + entries.size() + " entries)");
-        return ApiResponse.ok();
-    }
-
     @PutMapping("/{id}/livestock")
     public ApiResponse<Void> upsertLivestock(
             @PathVariable Integer id,
@@ -116,18 +103,6 @@ public class ReportController {
                 ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
                 "MonthlyReport", String.valueOf(id),
                 "Casual attendance updated (" + entries.size() + " entries)");
-        return ApiResponse.ok();
-    }
-
-    @PutMapping("/{id}/attendance-notes")
-    public ApiResponse<Void> upsertAttendanceNotes(
-            @PathVariable Integer id,
-            @Valid @RequestBody NoteRequest request,
-            Authentication auth) {
-        reportService.upsertAttendanceNotes(id, ClaimsHelper.getFarmId(auth), request);
-        auditService.log(AuditAction.ATTENDANCE_NOTES_UPDATED, auth,
-                ClaimsHelper.getFarmId(auth), ClaimsHelper.getFarmName(auth),
-                "MonthlyReport", String.valueOf(id), "Attendance notes updated");
         return ApiResponse.ok();
     }
 

@@ -2,13 +2,14 @@ package com.farmreports.api.repository;
 
 import com.farmreports.api.entity.Expense;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
 
-public interface ExpenseRepository extends JpaRepository<Expense, Integer> {
+public interface ExpenseRepository extends JpaRepository<Expense, Integer>, JpaSpecificationExecutor<Expense> {
 
     @Modifying(clearAutomatically = true)
     @Query("DELETE FROM Expense e WHERE e.report.id = :reportId")
@@ -18,4 +19,9 @@ public interface ExpenseRepository extends JpaRepository<Expense, Integer> {
     BigDecimal sumCostByFarmAndYearAndMonth(@Param("farmId") Integer farmId, @Param("year") Integer year, @Param("month") Integer month);
 
     long countByReportId(Integer reportId);
+
+    boolean existsByReport_Farm_IdAndReceiptNoIgnoreCase(Integer farmId, String receiptNo);
+
+    @Query("SELECT COALESCE(MAX(e.entryNo), 0) FROM Expense e WHERE e.report.id = :reportId")
+    int findMaxEntryNoByReportId(@Param("reportId") Integer reportId);
 }

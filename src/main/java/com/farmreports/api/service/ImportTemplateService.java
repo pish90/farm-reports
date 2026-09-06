@@ -1,10 +1,12 @@
 package com.farmreports.api.service;
 
 import com.farmreports.api.entity.Employee;
+import com.farmreports.api.entity.ExpenseCategory;
 import com.farmreports.api.entity.Farm;
 import com.farmreports.api.entity.LivestockCategory;
 import com.farmreports.api.entity.LivestockType;
 import com.farmreports.api.repository.EmployeeRepository;
+import com.farmreports.api.repository.ExpenseCategoryRepository;
 import com.farmreports.api.repository.FarmRepository;
 import com.farmreports.api.repository.LivestockTypeRepository;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +44,7 @@ public class ImportTemplateService {
     private final FarmRepository farmRepo;
     private final LivestockTypeRepository livestockTypeRepo;
     private final EmployeeRepository employeeRepo;
+    private final ExpenseCategoryRepository expenseCategoryRepo;
 
     // Canonical display order per category; mirrors the real client template column order.
     // Types present in the DB but not listed here (e.g. a future addition) are appended
@@ -100,6 +103,65 @@ public class ImportTemplateService {
                             "erroring — it doesn't need to repeat their other details.",
                     "Delete the three example rows on the first sheet before uploading your own data.",
                     "Upload via ADMIN > Bulk Import > Employees. Either .csv or .xlsx is accepted."
+            ));
+
+            return toBytes(wb);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not build template");
+        }
+    }
+
+    // ── Expenses import ──────────────────────────────────────────────────────
+
+    public byte[] buildExpensesTemplate() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Styles styles = new Styles(wb);
+            Sheet sheet = wb.createSheet("expenses_import_template");
+
+            String[] headers = {"farm", "date", "ID", "supplier", "product/service", "category", "amount"};
+            Set<String> required = Set.of("farm", "date", "ID", "amount");
+            writeHeaderRow(sheet, 0, headers, required, styles);
+
+            String farmName = farmRepo.findAll().stream().findFirst().map(Farm::getName).orElse("Matunda");
+            List<String> categoryNames = expenseCategoryRepo.findAll().stream()
+                    .map(ExpenseCategory::getAccountName).sorted().toList();
+            String category1 = categoryNames.stream().filter(n -> n.toLowerCase().contains("fuel"))
+                    .findFirst().orElse(categoryNames.stream().findFirst().orElse(""));
+            String category2 = categoryNames.stream().filter(n -> n.toLowerCase().contains("veterinary"))
+                    .findFirst().orElse(category1);
+
+            writeExampleRow(sheet, 1, styles, farmName, "2026-01-15", "INV-1001", "ABC Traders",
+                    "Diesel", category1, "5400.00");
+            writeExampleRow(sheet, 2, styles, farmName, "2026-01-18", "INV-1002", "Vet Services Ltd",
+                    "Deworming injections", category2, "3200.00");
+
+            for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
+            sheet.createFreezePane(0, 1);
+
+            Sheet lookup = wb.createSheet("Expense Categories");
+            Row lookupHeader = lookup.createRow(0);
+            setCell(lookupHeader, 0, "Category", styles.header);
+            setCell(lookupHeader, 1, "Account Code", styles.header);
+            int r = 1;
+            for (ExpenseCategory c : expenseCategoryRepo.findAll()) {
+                Row row = lookup.createRow(r++);
+                setCell(row, 0, c.getAccountName(), styles.plain);
+                setCell(row, 1, c.getAccountCode(), styles.plain);
+            }
+            for (int i = 0; i < 2; i++) lookup.autoSizeColumn(i);
+
+            Sheet notes = wb.createSheet("Instructions");
+            writeInstructions(notes, styles, "Expenses import (CSV or XLSX)", List.of(
+                    "Required columns: farm, date, ID, amount.",
+                    "farm must exactly match one of: " + farmNamesList() + ".",
+                    "date must be in yyyy-MM-dd format, e.g. 2026-01-15 — it determines which farm/month report the expense is added to.",
+                    "ID is your own receipt/voucher number. It must be unique per farm — re-uploading a row with an ID " +
+                            "that's already recorded for that farm is rejected as a duplicate rather than creating a second expense.",
+                    "category should match one of the names on the 'Expense Categories' sheet (or its account code). " +
+                            "An unrecognized or blank category is imported with no category assigned, to be set later by hand.",
+                    "This import only adds new expense rows — it never deletes or changes anything already recorded.",
+                    "Delete the two example rows on the first sheet before uploading your own data.",
+                    "Upload via ADMIN > Bulk Import > Expenses. Either .csv or .xlsx is accepted."
             ));
 
             return toBytes(wb);

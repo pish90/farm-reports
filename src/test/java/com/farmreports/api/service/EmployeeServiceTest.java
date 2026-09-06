@@ -1,5 +1,6 @@
 package com.farmreports.api.service;
 
+import com.farmreports.api.dto.EmployeeAnnualPayrollDto;
 import com.farmreports.api.dto.EmployeeCsvImportResult;
 import com.farmreports.api.dto.EmployeeDto;
 import com.farmreports.api.dto.EmployeeRequest;
@@ -25,6 +26,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
@@ -32,6 +34,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -133,15 +136,20 @@ class EmployeeServiceTest {
     }
 
     @Test
-    void importEmployeesFromCsv_matchesExistingEmployeeWithSameType_rejectsRowAsDuplicate() {
+    void importEmployeesFromCsv_matchesExistingEmployeeWithSameType_backfillsBlankFieldsWithoutError() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda, lesA, kenlet));
 
+        // Existing employee has the same employment type already, but all personal-detail
+        // fields are blank (e.g. wiped by an earlier data cleanup) — the re-uploaded roster
+        // should fill them in rather than being rejected as a duplicate.
         Employee existing = new Employee();
+        existing.setId(9);
         existing.setFarm(matunda);
         existing.setFirstName("Jane");
         existing.setLastName("Doe");
         existing.setSalaried(true);
         when(employeeRepo.findAll()).thenReturn(List.of(existing));
+        when(employeeRepo.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
 
         String csv = "farmName,firstName,lastName,phone,employmentType,jobTitle,startDate,defaultDailyRate\n"
                 + "Matunda,jane,doe,0712345678,SALARIED,Herdsman,2024-01-15,\n";
@@ -150,13 +158,48 @@ class EmployeeServiceTest {
 
         EmployeeCsvImportResult result = employeeService.importEmployeesFromCsv(file);
 
-        assertThat(result.success()).isFalse();
+        assertThat(result.success()).isTrue();
         assertThat(result.importedCount()).isEqualTo(0);
-        assertThat(result.mergedCount()).isEqualTo(0);
-        assertThat(result.errors()).hasSize(1);
-        assertThat(result.errors().get(0).message()).contains("already exists");
+        assertThat(result.mergedCount()).isEqualTo(1);
+        assertThat(result.errors()).isEmpty();
         verifyNoInteractions(employeeIdService);
-        verify(employeeRepo, never()).save(any());
+
+        ArgumentCaptor<Employee> saved = ArgumentCaptor.forClass(Employee.class);
+        verify(employeeRepo).save(saved.capture());
+        assertThat(saved.getValue().getPhone()).isEqualTo("0712345678");
+        assertThat(saved.getValue().getJobTitle()).isEqualTo("Herdsman");
+        assertThat(saved.getValue().getStartDate()).isEqualTo(java.time.LocalDate.of(2024, 1, 15));
+    }
+
+    @Test
+    void importEmployeesFromCsv_matchesExistingEmployeeWithFieldsAlreadySet_neverOverwritesThem() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda, lesA, kenlet));
+
+        Employee existing = new Employee();
+        existing.setId(9);
+        existing.setFarm(matunda);
+        existing.setFirstName("Jane");
+        existing.setLastName("Doe");
+        existing.setSalaried(true);
+        existing.setPhone("0700000000");
+        existing.setJobTitle("Original Title");
+        when(employeeRepo.findAll()).thenReturn(List.of(existing));
+        when(employeeRepo.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        String csv = "farmName,firstName,lastName,phone,employmentType,jobTitle,startDate,defaultDailyRate\n"
+                + "Matunda,jane,doe,0712345678,SALARIED,Herdsman,2024-01-15,\n";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "employees.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
+
+        EmployeeCsvImportResult result = employeeService.importEmployeesFromCsv(file);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.mergedCount()).isEqualTo(1);
+
+        ArgumentCaptor<Employee> saved = ArgumentCaptor.forClass(Employee.class);
+        verify(employeeRepo).save(saved.capture());
+        assertThat(saved.getValue().getPhone()).isEqualTo("0700000000");
+        assertThat(saved.getValue().getJobTitle()).isEqualTo("Original Title");
     }
 
     @Test
@@ -434,5 +477,45 @@ class EmployeeServiceTest {
         employeeService.deleteEmployee(1, 1);
 
         verify(employeeRepo).delete(jane);
+    }
+
+    // ── Annual payroll (replaces attendance tracking) ───────────────────────────
+
+    @Test
+    void getFarmAnnualPayroll_returnsOneEntryPerSalariedEmployee_includingInactive() {
+        Employee jane = new Employee();
+        jane.setId(1);
+        jane.setFarm(matunda);
+        jane.setFirstName("Jane");
+        jane.setLastName("Doe");
+        jane.setLsNumber("LS2001M");
+        jane.setStatus("ACTIVE");
+
+        Employee john = new Employee();
+        john.setId(2);
+        john.setFarm(matunda);
+        john.setFirstName("John");
+        john.setLastName("Smith");
+        john.setLsNumber("LS2002M");
+        john.setStatus("INACTIVE"); // left mid-year, but should still show YTD earnings
+
+        when(employeeRepo.findByFarmIdAndSalariedTrueOrderByFirstNameAscLastNameAsc(1))
+                .thenReturn(List.of(jane, john));
+        when(employeeRepo.findByIdAndFarmId(anyInt(), eq(1)))
+                .thenReturn(Optional.of(jane), Optional.of(john));
+        when(payrollRepo.sumGrossSalaryBeforeYear(eq(1), anyInt(), eq(2026))).thenReturn(BigDecimal.ZERO);
+        when(paymentRepo.sumAmountBeforeDate(anyInt(), eq(1), any())).thenReturn(BigDecimal.ZERO);
+        when(payrollRepo.findByFarmIdAndEmployeeIdAndYear(eq(1), anyInt(), eq(2026))).thenReturn(List.of());
+        when(paymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(anyInt(), eq(1), any(), any()))
+                .thenReturn(List.of());
+
+        List<EmployeeAnnualPayrollDto> result = employeeService.getFarmAnnualPayroll(1, 2026);
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).employeeName()).isEqualTo("Jane Doe");
+        assertThat(result.get(0).status()).isEqualTo("ACTIVE");
+        assertThat(result.get(0).ledger().year()).isEqualTo(2026);
+        assertThat(result.get(1).employeeName()).isEqualTo("John Smith");
+        assertThat(result.get(1).status()).isEqualTo("INACTIVE");
     }
 }

@@ -20,7 +20,6 @@ import java.util.List;
 public class ReportService {
 
     private final MonthlyReportRepository reportRepository;
-    private final AttendanceRepository attendanceRepository;
     private final LivestockReturnRepository livestockReturnRepository;
     private final MilkProductionRepository milkProductionRepository;
     private final ExpenseRepository expenseRepository;
@@ -51,58 +50,6 @@ public class ReportService {
                     report.setMonth(month);
                     return toDto(reportRepository.save(report));
                 });
-    }
-
-    public void upsertAttendance(Integer reportId, Integer farmId, List<AttendanceEntryRequest> entries) {
-        // Pessimistic write lock so concurrent syncs from multiple devices don't race
-        MonthlyReport report = reportRepository.findByIdAndFarmIdForUpdate(reportId, farmId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report not found"));
-
-        if (entries.isEmpty() && attendanceRepository.existsByReportId(reportId)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                "Cannot replace existing attendance records with an empty list");
-        }
-
-        // Deduplicate by (workerId, dayOfMonth) — last entry wins — guards against
-        // mobile devices occasionally sending duplicate rows in the same payload
-        java.util.Map<String, AttendanceEntryRequest> deduped = new java.util.LinkedHashMap<>();
-        for (AttendanceEntryRequest e : entries) {
-            deduped.put(e.workerId() + "_" + e.dayOfMonth(), e);
-        }
-        List<AttendanceEntryRequest> uniqueEntries = new java.util.ArrayList<>(deduped.values());
-
-        attendanceRepository.deleteByReportId(reportId);
-
-        List<Attendance> records = uniqueEntries.stream().map(e -> {
-            Employee employee = employeeRepository.findByIdAndFarmIdAndSalariedTrue(
-                            e.workerId(), farmId)
-                    .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                            "Worker not found: " + e.workerId()));
-            Attendance a = new Attendance();
-            a.setReport(report);
-            a.setEmployee(employee);
-            a.setDayOfMonth(e.dayOfMonth());
-            String status = e.status() != null ? e.status() : (Boolean.TRUE.equals(e.present()) ? "P" : "A");
-            a.setStatus(status);
-            a.setPresent("P".equals(status));
-            a.setNotes(e.notes());
-            return a;
-        }).toList();
-
-        attendanceRepository.saveAll(records);
-    }
-
-    public void upsertAttendanceNotes(Integer reportId, Integer farmId, NoteRequest request) {
-        loadReportForFarm(reportId, farmId);
-        jdbc.update("DELETE FROM attendance_worker_notes WHERE report_id = ?", reportId);
-        for (NoteRequest.NoteEntry entry : request.notes()) {
-            if (entry.note() != null && !entry.note().isBlank()) {
-                jdbc.update(
-                    "INSERT INTO attendance_worker_notes (report_id, worker_id, note) VALUES (?, ?, ?)",
-                    reportId, entry.subjectId(), entry.note().trim()
-                );
-            }
-        }
     }
 
     public void upsertLivestockNotes(Integer reportId, Integer farmId, NoteRequest request) {
@@ -226,10 +173,6 @@ public class ReportService {
         if (report.getStatus() == ReportStatus.SUBMITTED) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Report already submitted");
         }
-        if (report.getAttendance().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Attendance section must not be empty before submitting");
-        }
         if (report.getLivestockReturns().isEmpty()) {
             throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "Livestock section must not be empty before submitting");
@@ -272,7 +215,7 @@ public class ReportService {
     @Transactional(readOnly = true)
     public ReportDto getReportById(Integer id, Integer farmId, String role) {
         MonthlyReport report;
-        if ("ADMIN".equals(role) || "MANAGER".equals(role)) {
+        if ("ADMIN".equals(role) || "OPERATIONS_MANAGER".equals(role)) {
             report = reportRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report not found"));
         } else {
@@ -287,17 +230,6 @@ public class ReportService {
     }
 
     private ReportDto toDto(MonthlyReport report) {
-        List<AttendanceRecordDto> attendance = report.getAttendance().stream()
-                .map(a -> new AttendanceRecordDto(
-                        a.getId(),
-                        a.getEmployee().getId(),
-                        a.getEmployee().getFullName(),
-                        a.getDayOfMonth(),
-                        a.isPresent(),
-                        a.getStatus() != null ? a.getStatus() : (a.isPresent() ? "P" : "A"),
-                        a.getNotes()))
-                .toList();
-
         List<LivestockRecordDto> livestock = report.getLivestockReturns().stream()
                 .map(lr -> new LivestockRecordDto(
                         lr.getId(),
@@ -365,7 +297,6 @@ public class ReportService {
                 report.getStatus().name(),
                 report.getSubmittedAt(),
                 report.getCreatedAt(),
-                attendance,
                 livestock,
                 milk,
                 expenses,

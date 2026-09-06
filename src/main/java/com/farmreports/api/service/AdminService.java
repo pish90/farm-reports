@@ -1,5 +1,6 @@
 package com.farmreports.api.service;
 
+import com.farmreports.api.dto.ExpenseListItemDto;
 import com.farmreports.api.dto.FarmLiveStatusDto;
 import com.farmreports.api.dto.FarmSummaryDto;
 import com.farmreports.api.dto.PageDto;
@@ -32,18 +33,23 @@ public class AdminService {
     private final MonthlyReportRepository reportRepository;
     private final MilkProductionRepository milkRepository;
     private final ExpenseRepository expenseRepository;
-    private final AttendanceRepository attendanceRepository;
+    private final PayrollEntryRepository payrollEntryRepository;
     private final LivestockReturnRepository livestockReturnRepository;
     private final EmployeeRepository employeeRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final DataBackupRepository dataBackupRepository;
 
-    public List<FarmSummaryDto> getAllFarmSummaries() {
+    /** farmId null → every farm (ADMIN/OPERATIONS_MANAGER); non-null → that farm only (MANAGER,
+     *  confined to their own farm by the caller). */
+    private List<Farm> farmsInScope(Integer farmId) {
+        return farmId != null ? farmRepository.findById(farmId).map(List::of).orElse(List.of()) : farmRepository.findAll();
+    }
+
+    public List<FarmSummaryDto> getAllFarmSummaries(Integer farmId) {
         int year = LocalDate.now().getYear();
         int month = LocalDate.now().getMonthValue();
 
-        return farmRepository.findAll().stream().map(farm -> {
+        return farmsInScope(farmId).stream().map(farm -> {
             LocalDateTime lastSubmitted = reportRepository
                 .findFirstByFarm_IdAndStatusOrderBySubmittedAtDesc(farm.getId(), ReportStatus.SUBMITTED)
                 .map(MonthlyReport::getSubmittedAt)
@@ -59,15 +65,16 @@ public class AdminService {
         }).toList();
     }
 
-    public List<FarmLiveStatusDto> getFarmLiveStatus(int year, int month) {
-        return farmRepository.findAll().stream().map(farm -> {
+    /** farmId null → every farm (ADMIN/OPERATIONS_MANAGER); non-null → that farm only (MANAGER,
+     *  confined to their own farm by the caller). */
+    public List<FarmLiveStatusDto> getFarmLiveStatus(int year, int month, Integer farmId) {
+        return farmsInScope(farmId).stream().map(farm -> {
             var report = reportRepository.findByFarmIdAndYearAndMonth(farm.getId(), year, month);
 
             String reportStatus = report.map(r -> r.getStatus().name()).orElse("NOT_STARTED");
             Integer reportId = report.map(MonthlyReport::getId).orElse(null);
 
-            long attendanceDays = reportId != null
-                    ? attendanceRepository.countDistinctDaysByReportId(reportId) : 0;
+            long payrollEntriesRecorded = payrollEntryRepository.countByFarmIdAndYearAndMonth(farm.getId(), year, month);
             long expenseCount = reportId != null
                     ? expenseRepository.countByReportId(reportId) : 0;
             boolean livestockEntered = reportId != null
@@ -81,7 +88,7 @@ public class AdminService {
             return new FarmLiveStatusDto(
                     farm.getId(), farm.getName(), year, month,
                     reportStatus, reportId,
-                    (int) activeWorkers, attendanceDays,
+                    (int) activeWorkers, payrollEntriesRecorded,
                     milk != null ? milk.doubleValue() : 0.0,
                     expenseCount,
                     expenses != null ? expenses.doubleValue() : 0.0,
@@ -117,50 +124,45 @@ public class AdminService {
             .map(r -> new ReportDto(
                 r.getId(), r.getFarm().getId(), r.getYear(), r.getMonth(),
                 r.getStatus().name(), r.getSubmittedAt(), r.getCreatedAt(),
-                null, null, null, null, null
+                null, null, null, null
             ))
             .toList();
         return new PageDto<>(content, result.getTotalElements(), result.getTotalPages(), page, size);
     }
 
-    public String buildAttendanceCsv() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("farm,year,month,report_status,employee_id,worker_name,day_of_month,present,status\n");
-        attendanceRepository.findAll().forEach(a -> {
-            MonthlyReport r  = a.getReport();
-            Employee      e  = a.getEmployee();
-            sb.append(escapeCsv(r.getFarm().getName())).append(',')
-              .append(r.getYear()).append(',')
-              .append(r.getMonth()).append(',')
-              .append(r.getStatus().name()).append(',')
-              .append(escapeCsv(e.getEmployeeId())).append(',')
-              .append(escapeCsv(e.getFullName())).append(',')
-              .append(a.getDayOfMonth()).append(',')
-              .append(a.isPresent()).append(',')
-              .append(a.getStatus() != null ? a.getStatus() : (a.isPresent() ? "P" : "A"))
-              .append('\n');
-        });
-        return sb.toString();
-    }
+    /** Flat, farm-tagged expense listing across reports for the standalone Expenses page —
+     *  distinct from a single report's own Expenses tab, which reads {@code report.expenses}. */
+    public PageDto<ExpenseListItemDto> listExpenses(Integer farmId, Integer year, Integer month,
+                                                     Integer categoryId, int page, int size) {
+        Specification<Expense> spec = Specification.where(null);
+        if (farmId != null)
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("report").get("farm").get("id"), farmId));
+        if (year != null)
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("report").get("year"), year));
+        if (month != null)
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("report").get("month"), month));
+        if (categoryId != null)
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("category").get("id"), categoryId));
 
-    @Transactional
-    public DataBackup createBackup(String backupType, String createdBy) {
-        String csv = buildAttendanceCsv();
-        long rows = csv.lines().count() - 1; // subtract header
+        Sort sort = Sort.by(Sort.Direction.DESC, "date").and(Sort.by(Sort.Direction.DESC, "entryNo"));
+        Page<Expense> result = expenseRepository.findAll(spec, PageRequest.of(page, size, sort));
 
-        DataBackup backup = new DataBackup();
-        backup.setBackupType(backupType);
-        backup.setCreatedAt(LocalDateTime.now());
-        backup.setCreatedBy(createdBy);
-        backup.setRowCount((int) rows);
-        backup.setDataCsv(csv);
-        return dataBackupRepository.save(backup);
-    }
-
-    private static String escapeCsv(String value) {
-        if (value == null) return "";
-        if (value.contains(",") || value.contains("\"") || value.contains("\n"))
-            return "\"" + value.replace("\"", "\"\"") + "\"";
-        return value;
+        List<ExpenseListItemDto> content = result.getContent().stream()
+                .map(e -> new ExpenseListItemDto(
+                        e.getId(),
+                        e.getReport().getId(),
+                        e.getReport().getFarm().getId(),
+                        e.getReport().getFarm().getName(),
+                        e.getReport().getYear(),
+                        e.getReport().getMonth(),
+                        e.getDate(),
+                        e.getReceiptNo(),
+                        e.getSupplierContractor(),
+                        e.getDescription(),
+                        e.getCategory() != null ? e.getCategory().getAccountName() : null,
+                        e.getCost()
+                ))
+                .toList();
+        return new PageDto<>(content, result.getTotalElements(), result.getTotalPages(), page, size);
     }
 }

@@ -37,6 +37,7 @@ public enum AuditAction {
     LIVESTOCK_XLSX_IMPORTED,
     MILK_XLSX_IMPORTED,
     EMPLOYEE_PAY_XLSX_IMPORTED,
+    EXPENSES_CSV_IMPORTED,
 
     // Casual labourers
     CASUAL_LABOURER_ADDED,

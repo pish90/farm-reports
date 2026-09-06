@@ -1,12 +1,14 @@
 package com.farmreports.api.controller;
 
 import com.farmreports.api.dto.ApiResponse;
+import com.farmreports.api.dto.EmployeeAnnualPayrollDto;
 import com.farmreports.api.dto.PayrollEntryRequest;
 import com.farmreports.api.dto.PayrollRecordDto;
 import com.farmreports.api.dto.PayrollSummaryDto;
 import com.farmreports.api.entity.AuditAction;
 import com.farmreports.api.security.ClaimsHelper;
 import com.farmreports.api.service.AuditService;
+import com.farmreports.api.service.EmployeeService;
 import com.farmreports.api.service.PayrollService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,7 @@ import java.util.List;
 public class PayrollController {
 
     private final PayrollService payrollService;
+    private final EmployeeService employeeService;
     private final AuditService auditService;
 
     @GetMapping
@@ -74,6 +77,17 @@ public class PayrollController {
             Authentication auth) {
         checkFarmAccess(farmId, auth);
         return ApiResponse.ok(payrollService.getAnnualPayrollSummary(farmId, year));
+    }
+
+    /** Per-employee annual payroll (earned/paid/balance by month) for every salaried employee on
+     *  a farm — backs the "Payroll" tab on a report's detail page. */
+    @GetMapping("/annual")
+    public ApiResponse<List<EmployeeAnnualPayrollDto>> getFarmAnnualPayroll(
+            @RequestParam Integer farmId,
+            @RequestParam Integer year,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        return ApiResponse.ok(employeeService.getFarmAnnualPayroll(farmId, year));
     }
 
     private void checkFarmAccess(Integer farmId, Authentication auth) {

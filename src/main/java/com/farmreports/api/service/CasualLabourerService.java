@@ -35,10 +35,12 @@ public class CasualLabourerService {
 
     // ── Casual labourers ─────────────────────────────────────────────────────
 
+    /** Every active employee at the farm, regardless of salaried/casual flag — any employee can
+     *  be picked for a casual work session, not just ones already flagged isCasual. */
     @Transactional(readOnly = true)
     public List<CasualLabourerDto> getActiveCasualLabourers(Integer farmId) {
         return employeeRepository
-                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE")
+                .findByFarmIdAndStatus(farmId, "ACTIVE")
                 .stream()
                 .map(this::toDto)
                 .toList();
@@ -82,8 +84,8 @@ public class CasualLabourerService {
 
     @Transactional
     public CasualLabourerDto updateCasualLabourer(Integer farmId, Integer labourerId, CasualLabourerRequest request) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
+        Employee employee = employeeRepository.findByIdAndFarmId(labourerId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
 
         String firstName = resolveFirstName(request.firstName(), request.name());
         if (firstName != null) employee.setFirstName(firstName);
@@ -107,8 +109,8 @@ public class CasualLabourerService {
 
     @Transactional
     public void deactivateCasualLabourer(Integer farmId, Integer labourerId) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
+        Employee employee = employeeRepository.findByIdAndFarmId(labourerId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
         employee.setStatus("INACTIVE");
     }
 
@@ -194,7 +196,7 @@ public class CasualLabourerService {
     @Transactional(readOnly = true)
     public List<CasualLabourerReportDto> getAllSummaries(Integer farmId) {
         List<Employee> labourers = employeeRepository
-                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE");
+                .findByFarmIdAndStatus(farmId, "ACTIVE");
         List<CasualWorkSession> sessions = workSessionRepository.findByFarmIdWithEntries(farmId);
 
         return labourers.stream().map(l -> {
@@ -223,8 +225,8 @@ public class CasualLabourerService {
 
     @Transactional(readOnly = true)
     public EmployeeLedgerDto getLedger(Integer farmId, Integer labourerId, Integer year) {
-        employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
+        employeeRepository.findByIdAndFarmId(labourerId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
 
         LocalDate yearStart = LocalDate.of(year, 1, 1);
 
@@ -281,8 +283,8 @@ public class CasualLabourerService {
 
     @Transactional(readOnly = true)
     public CasualLabourerSummaryDto getSummary(Integer farmId, Integer labourerId) {
-        employeeRepository.findByIdAndFarmIdAndCasualTrue(labourerId, farmId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
+        employeeRepository.findByIdAndFarmId(labourerId, farmId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
 
         BigDecimal allTimeEarned = coalesce(workEntryRepository.sumEarnedByEmployeeId(labourerId));
         BigDecimal allTimePaid   = coalesce(paymentRepository.sumAmountByEmployeeId(labourerId));
@@ -302,9 +304,9 @@ public class CasualLabourerService {
     @Transactional
     public CasualLabourerPaymentDto recordPayment(Integer farmId, Integer labourerId,
                                                    RecordPaymentRequest request, String paidBy) {
-        Employee employee = employeeRepository.findByIdAndFarmIdAndCasualTrue(
+        Employee employee = employeeRepository.findByIdAndFarmId(
                         labourerId, farmId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Casual labourer not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee not found"));
         Farm farm = farmRepository.getReferenceById(farmId);
 
         // Balance check: payment must not exceed total earned minus already paid
@@ -346,7 +348,7 @@ public class CasualLabourerService {
     @Transactional(readOnly = true)
     public List<CasualPayrollEntryDto> getMonthlyPayroll(Integer farmId, Integer year, Integer month) {
         List<Employee> labourers = employeeRepository
-                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE");
+                .findByFarmIdAndStatus(farmId, "ACTIVE");
 
         Integer reportId = getReportIdForMonth(farmId, year, month);
         var monthAttendance = reportId != null
@@ -381,7 +383,7 @@ public class CasualLabourerService {
     @Transactional(readOnly = true)
     public byte[] generateMonthlyExcel(Integer farmId, Integer year, Integer month) {
         List<Employee> labourers = employeeRepository
-                .findByFarmIdAndStatusAndCasualTrue(farmId, "ACTIVE");
+                .findByFarmIdAndStatus(farmId, "ACTIVE");
         List<CasualWorkSession> sessions = workSessionRepository.findByFarmIdWithEntries(farmId);
 
         List<ExportService.CasualLabourerRow> summaryRows = labourers.stream().map(l -> {
@@ -436,7 +438,9 @@ public class CasualLabourerService {
                 photoBase64,
                 e.getPhotoMimeType(),
                 e.getJobTitle(),
-                e.getDepartment() != null ? e.getDepartment().getName() : null
+                e.getDepartment() != null ? e.getDepartment().getName() : null,
+                e.isSalaried(),
+                e.isCasual()
         );
     }
 

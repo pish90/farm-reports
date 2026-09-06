@@ -6,6 +6,8 @@ import com.farmreports.api.dto.MilkEntryRequest;
 import com.farmreports.api.dto.ReportDto;
 import com.farmreports.api.entity.Employee;
 import com.farmreports.api.entity.EmployeePayment;
+import com.farmreports.api.entity.Expense;
+import com.farmreports.api.entity.ExpenseCategory;
 import com.farmreports.api.entity.Farm;
 import com.farmreports.api.entity.LivestockCategory;
 import com.farmreports.api.entity.LivestockReturn;
@@ -15,6 +17,8 @@ import com.farmreports.api.entity.MonthlyReport;
 import com.farmreports.api.entity.PayrollEntry;
 import com.farmreports.api.repository.EmployeePaymentRepository;
 import com.farmreports.api.repository.EmployeeRepository;
+import com.farmreports.api.repository.ExpenseCategoryRepository;
+import com.farmreports.api.repository.ExpenseRepository;
 import com.farmreports.api.repository.FarmRepository;
 import com.farmreports.api.repository.LivestockTypeRepository;
 import com.farmreports.api.repository.MonthlyReportRepository;
@@ -33,6 +37,7 @@ import org.springframework.mock.web.MockMultipartFile;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 
@@ -54,6 +59,8 @@ class BulkImportServiceTest {
     @Mock PayrollEntryRepository payrollRepo;
     @Mock EmployeePaymentRepository paymentRepo;
     @Mock ReportService reportService;
+    @Mock ExpenseRepository expenseRepo;
+    @Mock ExpenseCategoryRepository expenseCategoryRepo;
 
     BulkImportService bulkImportService;
 
@@ -62,7 +69,8 @@ class BulkImportServiceTest {
     @BeforeEach
     void setUp() {
         bulkImportService = new BulkImportService(
-                farmRepo, reportRepo, livestockTypeRepo, employeeRepo, payrollRepo, paymentRepo, reportService);
+                farmRepo, reportRepo, livestockTypeRepo, employeeRepo, payrollRepo, paymentRepo, reportService,
+                expenseRepo, expenseCategoryRepo);
 
         matunda = new Farm();
         matunda.setId(1);
@@ -128,7 +136,7 @@ class BulkImportServiceTest {
         report.getLivestockReturns().add(existing);
 
         when(reportService.createOrGetReport(1, 2026, 1, 99)).thenReturn(
-                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null, null));
+                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
         when(reportRepo.findById(55)).thenReturn(Optional.of(report));
 
         ImportResult result = bulkImportService.importLivestockFromXlsx(file, 2026, 99);
@@ -206,7 +214,7 @@ class BulkImportServiceTest {
         report.getMilkProduction().add(existing);
 
         when(reportService.createOrGetReport(1, 2026, 1, 99)).thenReturn(
-                new ReportDto(60, 1, 2026, 1, "DRAFT", null, null, null, null, null, null, null));
+                new ReportDto(60, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
         when(reportRepo.findById(60)).thenReturn(Optional.of(report));
 
         ImportResult result = bulkImportService.importMilkFromXlsx(file, 2026, 99);
@@ -348,5 +356,118 @@ class BulkImportServiceTest {
 
         assertThat(result.success()).isFalse();
         assertThat(result.errors().get(0).message()).contains("Unknown LS number 'LS9999'");
+    }
+
+    // ── Expenses ─────────────────────────────────────────────────────────────
+
+    private static ExpenseCategory category(int id, String code, String name) {
+        ExpenseCategory c = new ExpenseCategory();
+        c.setId(id);
+        c.setAccountCode(code);
+        c.setAccountName(name);
+        return c;
+    }
+
+    private static MockMultipartFile expensesCsv(String csv) {
+        return new MockMultipartFile("file", "expenses.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    void importExpensesFromCsv_validRows_appendsToExistingReportWithIncrementingEntryNo() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of(category(1, "4000", "Fuel")));
+        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
+        when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(3);
+        when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
+                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+        when(reportRepo.getReferenceById(55)).thenReturn(new MonthlyReport());
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,Fuel,5400.00\n"
+                + "matunda,2026-01-18,INV-1002,XYZ Ltd,Tyres,fuel,1200\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.totalRows()).isEqualTo(2);
+        assertThat(result.importedCount()).isEqualTo(2);
+        assertThat(result.errors()).isEmpty();
+
+        ArgumentCaptor<Expense> captor = ArgumentCaptor.forClass(Expense.class);
+        verify(expenseRepo, org.mockito.Mockito.times(2)).save(captor.capture());
+        List<Expense> saved = captor.getAllValues();
+        assertThat(saved.get(0).getEntryNo()).isEqualTo(4);
+        assertThat(saved.get(0).getReceiptNo()).isEqualTo("INV-1001");
+        assertThat(saved.get(0).getCost()).isEqualByComparingTo("5400.00");
+        assertThat(saved.get(0).getCategory().getAccountName()).isEqualTo("Fuel");
+        assertThat(saved.get(1).getEntryNo()).isEqualTo(5);
+        assertThat(saved.get(1).getReceiptNo()).isEqualTo("INV-1002");
+    }
+
+    @Test
+    void importExpensesFromCsv_duplicateIdAlreadyInDb_rejectsRowAndWritesNothing() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of());
+        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001")).thenReturn(true);
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,,5400.00\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().get(0).message()).contains("already exists");
+        verify(expenseRepo, never()).save(any());
+    }
+
+    @Test
+    void importExpensesFromCsv_duplicateIdWithinFile_rejectsSecondOccurrence() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of());
+        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,,5400.00\n"
+                + "Matunda,2026-01-16,inv-1001,ABC Traders,Diesel,,900\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().get(0).row()).isEqualTo(3);
+        assertThat(result.errors().get(0).message()).contains("Duplicate ID in file");
+        verify(expenseRepo, never()).save(any());
+    }
+
+    @Test
+    void importExpensesFromCsv_unrecognizedCategory_leftBlankNotAnError() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of(category(1, "4000", "Fuel")));
+        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
+        when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
+        when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
+                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+        when(reportRepo.getReferenceById(55)).thenReturn(new MonthlyReport());
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,Nonexistent Category,5400.00\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<Expense> captor = ArgumentCaptor.forClass(Expense.class);
+        verify(expenseRepo).save(captor.capture());
+        assertThat(captor.getValue().getCategory()).isNull();
+    }
+
+    @Test
+    void importExpensesFromCsv_missingRequiredColumn_throwsBadRequest() {
+        String csv = "farm,date,supplier,amount\n" // missing ID column
+                + "Matunda,2026-01-15,ABC Traders,5400.00\n";
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42))
+                .hasMessageContaining("missing required column");
     }
 }

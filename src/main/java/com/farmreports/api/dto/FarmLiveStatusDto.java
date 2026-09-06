@@ -8,7 +8,7 @@ public record FarmLiveStatusDto(
         String reportStatus,       // "NOT_STARTED" | "DRAFT" | "SUBMITTED"
         Integer reportId,
         int activeWorkers,
-        long attendanceDaysRecorded,
+        long payrollEntriesRecorded,
         double milkTotalLitres,
         long expenseCount,
         double expenseTotal,

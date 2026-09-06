@@ -3,10 +3,12 @@ package com.farmreports.api.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 @Entity
 @Table(name = "expense_categories")
 @Getter
+@Setter
 @NoArgsConstructor
 public class ExpenseCategory {
 

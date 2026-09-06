@@ -12,7 +12,15 @@ public interface EmployeeRepository extends JpaRepository<Employee, Integer>, Jp
 
     List<Employee> findByFarmIdAndStatusAndSalariedTrue(Integer farmId, String status);
 
+    /** All salaried employees regardless of status, so someone who left mid-year still shows
+     *  their earned-this-year totals in the annual payroll view. */
+    List<Employee> findByFarmIdAndSalariedTrueOrderByFirstNameAscLastNameAsc(Integer farmId);
+
     List<Employee> findByFarmIdAndStatusAndCasualTrue(Integer farmId, String status);
+
+    /** All employees at a farm regardless of salaried/casual flag — used by the Casual Labour
+     *  page so any employee (not just isCasual=true ones) can be picked for a work session. */
+    List<Employee> findByFarmIdAndStatus(Integer farmId, String status);
 
     @Query("SELECT e FROM Employee e ORDER BY e.farm.name, e.firstName, e.lastName")
     List<Employee> findAllOrderByFarmAndName();

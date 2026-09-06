@@ -47,7 +47,8 @@ public class AdminController {
     @GetMapping("/farms")
     public ApiResponse<List<FarmSummaryDto>> getFarmSummaries(Authentication auth) {
         requireDashboardRole(auth);
-        return ApiResponse.ok(adminService.getAllFarmSummaries());
+        Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? null : ClaimsHelper.getFarmId(auth);
+        return ApiResponse.ok(adminService.getAllFarmSummaries(effectiveFarmId));
     }
 
     @GetMapping("/live-status")
@@ -58,7 +59,8 @@ public class AdminController {
         requireDashboardRole(auth);
         int y = year  != null ? year  : java.time.LocalDate.now().getYear();
         int m = month != null ? month : java.time.LocalDate.now().getMonthValue();
-        return ApiResponse.ok(adminService.getFarmLiveStatus(y, m));
+        Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? null : ClaimsHelper.getFarmId(auth);
+        return ApiResponse.ok(adminService.getFarmLiveStatus(y, m, effectiveFarmId));
     }
 
     // ── Master employee registry (all farms) ───────────────────────────────────
@@ -183,6 +185,38 @@ public class AdminController {
         return xlsxAttachment(importTemplateService.buildEmployeePayTemplate(), "employee_pay_import_template.xlsx");
     }
 
+    @PostMapping(value = "/expenses/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ImportResult> importExpenses(
+            @RequestParam("file") MultipartFile file,
+            Authentication auth) {
+        requireAdmin(auth);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is required");
+        }
+        String filename = file.getOriginalFilename() != null
+                ? file.getOriginalFilename().toLowerCase(java.util.Locale.ROOT) : "";
+        ImportResult result;
+        if (filename.endsWith(".xlsx")) {
+            result = bulkImportService.importExpensesFromXlsx(file, ClaimsHelper.getUserId(auth));
+        } else if (filename.endsWith(".csv")) {
+            result = bulkImportService.importExpensesFromCsv(file, ClaimsHelper.getUserId(auth));
+        } else {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File must be a .csv or .xlsx file");
+        }
+        if (result.success()) {
+            auditService.log(AuditAction.EXPENSES_CSV_IMPORTED, auth, null, null,
+                    "MonthlyReport", null,
+                    "Bulk expense import: " + result.importedCount() + " expense(s) added across farms");
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @GetMapping("/expenses/import/template")
+    public ResponseEntity<byte[]> downloadExpensesImportTemplate(Authentication auth) {
+        requireAdmin(auth);
+        return xlsxAttachment(importTemplateService.buildExpensesTemplate(), "expenses_import_template.xlsx");
+    }
+
     @PutMapping("/users/reset-password")
     public ApiResponse<Void> resetPassword(
             @Valid @RequestBody ResetPasswordRequest request,
@@ -208,6 +242,22 @@ public class AdminController {
         return ApiResponse.ok(adminService.listReports(effectiveFarmId, year, month, status, page, size));
     }
 
+    // ── Expenses (standalone page, spans reports) ──────────────────────────────
+
+    @GetMapping("/expenses")
+    public ApiResponse<PageDto<ExpenseListItemDto>> listExpenses(
+            @RequestParam(required = false) Integer farmId,
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer month,
+            @RequestParam(required = false) Integer categoryId,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            Authentication auth) {
+        requireDashboardRole(auth);
+        Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? farmId : ClaimsHelper.getFarmId(auth);
+        return ApiResponse.ok(adminService.listExpenses(effectiveFarmId, year, month, categoryId, page, size));
+    }
+
     // ── Admin report read/create ───────────────────────────────────────────────
 
     @GetMapping("/farms/{farmId}/report")
@@ -217,6 +267,7 @@ public class AdminController {
             @RequestParam Integer month,
             Authentication auth) {
         requireDashboardRole(auth);
+        checkFarmAccessOrOpsBypass(farmId, auth);
         return ApiResponse.ok(reportService.getReport(farmId, year, month));
     }
 
@@ -228,6 +279,7 @@ public class AdminController {
             @RequestParam Integer month,
             Authentication auth) {
         requireDashboardRole(auth);
+        checkFarmAccessOrOpsBypass(farmId, auth);
         ReportDto report = reportService.createOrGetReport(farmId, year, month, ClaimsHelper.getUserId(auth));
         auditService.log(AuditAction.REPORT_CREATED, auth, farmId, null,
                 "MonthlyReport", String.valueOf(report.id()),
@@ -240,24 +292,10 @@ public class AdminController {
             @PathVariable Integer id,
             Authentication auth) {
         requireDashboardRole(auth);
-        return ApiResponse.ok(reportService.getReportById(id, null, "ADMIN"));
+        return ApiResponse.ok(reportService.getReportById(id, ClaimsHelper.getFarmId(auth), ClaimsHelper.getRole(auth)));
     }
 
     // ── Admin report edit ──────────────────────────────────────────────────────
-
-    @PutMapping("/reports/{id}/attendance")
-    public ApiResponse<Void> adminUpsertAttendance(
-            @PathVariable Integer id,
-            @RequestParam Integer farmId,
-            @Valid @RequestBody List<@Valid AttendanceEntryRequest> entries,
-            Authentication auth) {
-        requireAdmin(auth);
-        reportService.upsertAttendance(id, farmId, entries);
-        auditService.log(AuditAction.ATTENDANCE_UPDATED, auth, farmId, null,
-                "MonthlyReport", String.valueOf(id),
-                "Attendance updated (" + entries.size() + " entries)");
-        return ApiResponse.ok();
-    }
 
     @PutMapping("/reports/{id}/livestock")
     public ApiResponse<Void> adminUpsertLivestock(
@@ -301,19 +339,6 @@ public class AdminController {
         return ApiResponse.ok();
     }
 
-    @PutMapping("/reports/{id}/attendance-notes")
-    public ApiResponse<Void> adminUpsertAttendanceNotes(
-            @PathVariable Integer id,
-            @RequestParam Integer farmId,
-            @Valid @RequestBody NoteRequest request,
-            Authentication auth) {
-        requireAdmin(auth);
-        reportService.upsertAttendanceNotes(id, farmId, request);
-        auditService.log(AuditAction.ATTENDANCE_NOTES_UPDATED, auth, farmId, null,
-                "MonthlyReport", String.valueOf(id), "Attendance notes updated");
-        return ApiResponse.ok();
-    }
-
     @PutMapping("/reports/{id}/livestock-notes")
     public ApiResponse<Void> adminUpsertLivestockNotes(
             @PathVariable Integer id,
@@ -333,6 +358,7 @@ public class AdminController {
             @RequestParam Integer farmId,
             Authentication auth) {
         requireDashboardRole(auth);
+        checkFarmAccessOrOpsBypass(farmId, auth);
         ReportDto report = reportService.submitReport(id, farmId);
         auditService.log(AuditAction.REPORT_SUBMITTED, auth, farmId, null,
                 "MonthlyReport", String.valueOf(id), "Report submitted");
@@ -359,7 +385,7 @@ public class AdminController {
             Authentication auth) {
         requireAdmin(auth);
 
-        List<FarmLiveStatusDto> statuses = adminService.getFarmLiveStatus(year, month);
+        List<FarmLiveStatusDto> statuses = adminService.getFarmLiveStatus(year, month, null);
         List<ExportService.FarmReport> entries = statuses.stream()
                 .filter(s -> s.reportId() != null)
                 .map(s -> new ExportService.FarmReport(
@@ -436,32 +462,13 @@ public class AdminController {
         return "OPERATIONS_MANAGER".equals(ClaimsHelper.getRole(auth));
     }
 
-    // ── Attendance backup (CSV) ────────────────────────────────────────────────
-
-    @GetMapping("/backup/attendance")
-    public ResponseEntity<byte[]> downloadAttendanceBackup(Authentication auth) {
-        requireAdmin(auth);
-        String csv = adminService.buildAttendanceCsv();
-        byte[] bytes = csv.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"attendance_backup.csv\"")
-                .contentType(MediaType.parseMediaType("text/csv"))
-                .body(bytes);
-    }
-
-    @PostMapping("/backup")
-    public ResponseEntity<byte[]> createBackup(Authentication auth) {
-        requireAdmin(auth);
-        var backup = adminService.createBackup("MANUAL", ClaimsHelper.getUserName(auth));
-        auditService.log(AuditAction.BACKUP_CREATED, auth, null, null,
-                "DataBackup", String.valueOf(backup.getId()),
-                "Manual attendance backup — " + backup.getRowCount() + " rows");
-        byte[] bytes = backup.getDataCsv().getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String filename = "attendance-backup-" + backup.getCreatedAt().toLocalDate() + ".csv";
-        return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
-                .contentType(MediaType.parseMediaType("text/csv"))
-                .body(bytes);
+    /** ADMIN and OPERATIONS_MANAGER may act on any farm; everyone else (MANAGER) is confined
+     *  to their own farm — mirrors the effectiveFarmId pattern used by the list endpoints above,
+     *  but for endpoints that take farmId as a path/request param rather than an optional filter. */
+    private void checkFarmAccessOrOpsBypass(Integer farmId, Authentication auth) {
+        if (isAdmin(auth) || isOpsManager(auth)) return;
+        if (!farmId.equals(ClaimsHelper.getFarmId(auth))) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+        }
     }
 }

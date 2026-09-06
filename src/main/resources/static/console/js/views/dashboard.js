@@ -67,7 +67,7 @@ export async function render(container) {
       <td>${escapeHtml(f.farmName)}</td>
       <td>${statusBadge(f.reportStatus)}</td>
       <td>${f.activeWorkers}</td>
-      <td>${f.attendanceDaysRecorded}</td>
+      <td>${f.payrollEntriesRecorded}</td>
       <td>${f.livestockEntered ? 'Yes' : 'No'}</td>
       <td>${formatMoney(f.milkTotalLitres)} L</td>
       <td>${f.expenseCount}</td>
@@ -87,7 +87,7 @@ export async function render(container) {
         <table>
           <thead>
             <tr>
-              <th>Farm</th><th>Report</th><th>Active workers</th><th>Attendance days</th>
+              <th>Farm</th><th>Report</th><th>Active workers</th><th>Payroll</th>
               <th>Livestock</th><th>Milk</th><th>Expense rows</th><th>Expense total</th><th></th>
             </tr>
           </thead>

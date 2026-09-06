@@ -14,7 +14,6 @@ public record ReportDto(
         String status,
         LocalDateTime submittedAt,
         LocalDateTime createdAt,
-        List<AttendanceRecordDto> attendance,
         List<LivestockRecordDto> livestock,
         List<MilkRecordDto> milk,
         List<ExpenseRecordDto> expenses,

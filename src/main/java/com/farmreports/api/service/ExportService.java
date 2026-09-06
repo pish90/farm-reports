@@ -46,10 +46,6 @@ public class ExportService {
             Styles s = createStyles(wb);
             int days = YearMonth.of(report.year(), report.month()).lengthOfMonth();
 
-            Sheet attSheet = wb.createSheet("Attendance");
-            buildAttendanceSection(attSheet, report, 0, s);
-            setAttendanceColumnWidths(attSheet, days);
-
             Sheet liveSheet = wb.createSheet("Livestock Returns");
             buildLivestockSection(liveSheet, report, 0, s);
             liveSheet.setColumnWidth(0, 4000);
@@ -73,7 +69,7 @@ public class ExportService {
 
             Sheet casualSheet = wb.createSheet("Casual Labourers");
             buildCasualAttendanceSection(casualSheet, report, 0, s);
-            setAttendanceColumnWidths(casualSheet, days);
+            setDailyGridColumnWidths(casualSheet, days);
             casualSheet.setColumnWidth(days + 7, 4000); // Amount Due column
 
             wb.write(out);
@@ -98,8 +94,6 @@ public class ExportService {
                 Sheet sheet = wb.createSheet(sheetName);
 
                 int row = 0;
-                row = buildAttendanceSection(sheet, fr.report(), row, s);
-                row += 2;
                 row = buildLivestockSection(sheet, fr.report(), row, s);
                 row += 2;
                 row = buildMilkSection(sheet, fr.report(), row, s);
@@ -108,7 +102,7 @@ public class ExportService {
                 row += 2;
                 buildCasualAttendanceSection(sheet, fr.report(), row, s);
 
-                // Column widths tuned for the attendance grid
+                // Column widths tuned for the casual labourer daily grid
                 sheet.setColumnWidth(0, 6000);
                 for (int d = 1; d <= Math.min(4, days); d++) sheet.setColumnWidth(d, 3000);
                 for (int d = 5; d <= days; d++) sheet.setColumnWidth(d, 1200);
@@ -123,77 +117,6 @@ public class ExportService {
     }
 
     // ── Section builders (return next available row index) ─────────────────────
-
-    private int buildAttendanceSection(Sheet sheet, ReportDto report, int startRow, Styles s) {
-        int days = YearMonth.of(report.year(), report.month()).lengthOfMonth();
-        List<AttendanceRecordDto> records = report.attendance() != null ? report.attendance() : List.of();
-
-        Row titleRow = sheet.createRow(startRow);
-        Cell tc = titleRow.createCell(0);
-        tc.setCellValue("Attendance – " + MONTH_NAMES[report.month()] + " " + report.year());
-        tc.setCellStyle(s.title());
-        sheet.addMergedRegion(new CellRangeAddress(startRow, startRow, 0, days + 6));
-
-        Row headerRow = sheet.createRow(startRow + 1);
-        createHdrCell(headerRow, 0, "Worker", s.header());
-        for (int d = 1; d <= days; d++) createHdrCell(headerRow, d, String.valueOf(d), s.header());
-        createHdrCell(headerRow, days + 1, "Present", s.header());
-        createHdrCell(headerRow, days + 2, "Absent",  s.header());
-        createHdrCell(headerRow, days + 3, "Annual",  s.header());
-        createHdrCell(headerRow, days + 4, "Sick",    s.header());
-        createHdrCell(headerRow, days + 5, "Parent",  s.header());
-        createHdrCell(headerRow, days + 6, "Days",    s.header());
-
-        Map<String, Map<Integer, String>> grid = new LinkedHashMap<>();
-        for (AttendanceRecordDto r : records) {
-            String status = r.status() != null ? r.status() : (r.present() ? "P" : "A");
-            grid.computeIfAbsent(r.workerName(), k -> new HashMap<>()).put(r.dayOfMonth(), status);
-        }
-
-        int rowIdx = startRow + 2;
-        int[] dayPresent = new int[days + 1];
-        for (Map.Entry<String, Map<Integer, String>> e : grid.entrySet()) {
-            Row row = sheet.createRow(rowIdx++);
-            row.createCell(0).setCellValue(e.getKey());
-            int cntP = 0, cntA = 0, cntAL = 0, cntSL = 0, cntPL = 0;
-            for (int d = 1; d <= days; d++) {
-                String status = e.getValue().getOrDefault(d, "A");
-                Cell c = row.createCell(d);
-                c.setCellValue(status);
-                c.setCellStyle(s.center());
-                switch (status) {
-                    case "P"  -> { cntP++;  dayPresent[d]++; }
-                    case "A"  -> cntA++;
-                    case "AL" -> cntAL++;
-                    case "SL" -> cntSL++;
-                    case "PL" -> cntPL++;
-                }
-            }
-            numCell(row, days + 1, cntP,  s);
-            numCell(row, days + 2, cntA,  s);
-            numCell(row, days + 3, cntAL, s);
-            numCell(row, days + 4, cntSL, s);
-            numCell(row, days + 5, cntPL, s);
-            numCell(row, days + 6, days,  s);
-        }
-
-        Row totalRow = sheet.createRow(rowIdx++);
-        Cell tc2 = totalRow.createCell(0);
-        tc2.setCellValue("TOTAL");
-        tc2.setCellStyle(s.bold());
-        int grandPresent = 0;
-        for (int d = 1; d <= days; d++) {
-            Cell c = totalRow.createCell(d);
-            c.setCellValue(dayPresent[d]);
-            c.setCellStyle(s.num());
-            grandPresent += dayPresent[d];
-        }
-        Cell gt = totalRow.createCell(days + 1);
-        gt.setCellValue(grandPresent);
-        gt.setCellStyle(s.bold());
-
-        return rowIdx;
-    }
 
     private void numCell(Row row, int col, int value, Styles s) {
         Cell c = row.createCell(col);
@@ -571,7 +494,7 @@ public class ExportService {
         return new Styles(createHeaderStyle(wb), createTitleStyle(wb), createNumStyle(wb), createBoldStyle(wb), createCenterStyle(wb));
     }
 
-    private void setAttendanceColumnWidths(Sheet sheet, int days) {
+    private void setDailyGridColumnWidths(Sheet sheet, int days) {
         sheet.setColumnWidth(0, 6000);
         for (int d = 1; d <= days; d++) sheet.setColumnWidth(d, 1200);
         for (int i = 1; i <= 6; i++) sheet.setColumnWidth(days + i, 2000);

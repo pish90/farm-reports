@@ -14,5 +14,7 @@ public record CasualLabourerDto(
         String photoBase64,
         String photoMimeType,
         String jobTitle,
-        String departmentName
+        String departmentName,
+        boolean isSalaried,
+        boolean isCasual
 ) {}

@@ -23,14 +23,6 @@ export async function render(container) {
       </div>
     </div>
     <div class="card">
-      <h3>Attendance backups</h3>
-      <p class="text-dim">Creates a saved backup row and downloads the CSV of all attendance ever recorded.</p>
-      <div class="toolbar">
-        <button id="backup-download-only" class="secondary">Download current CSV (no save)</button>
-        <button id="backup-create">Create backup + download</button>
-      </div>
-    </div>
-    <div class="card">
       <h3>Reset a user's password</h3>
       <form id="reset-form" class="form-grid">
         <div><label>Email</label><input type="email" name="email" required></div>
@@ -44,16 +36,6 @@ export async function render(container) {
     const year = container.querySelector('#x-year').value;
     const month = container.querySelector('#x-month').value;
     apiDownload(`/admin/export/excel?year=${year}&month=${month}`, `farm-reports-${year}-${String(month).padStart(2, '0')}.xlsx`)
-      .catch((err) => showToast(err.message, 'error'));
-  });
-
-  container.querySelector('#backup-download-only').addEventListener('click', () => {
-    apiDownload('/admin/backup/attendance', 'attendance_backup.csv').catch((err) => showToast(err.message, 'error'));
-  });
-
-  container.querySelector('#backup-create').addEventListener('click', () => {
-    apiDownload('/admin/backup', `attendance-backup-${new Date().toISOString().slice(0, 10)}.csv`, { method: 'POST' })
-      .then(() => showToast('Backup created', 'success'))
       .catch((err) => showToast(err.message, 'error'));
   });
 

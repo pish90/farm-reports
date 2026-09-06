@@ -3,11 +3,7 @@ import { isAdmin } from '../auth.js';
 import { escapeHtml, formatMoney, monthName, daysInMonth, showToast } from '../util.js';
 import { navigate } from '../router.js';
 
-const ATTENDANCE_STATUSES = ['', 'P', 'A', 'WA', 'H', 'SL', 'AL'];
-const PRESENT_STATUSES = new Set(['P', 'WA']);
-
 const TABS = [
-  { key: 'attendance', label: 'Attendance' },
   { key: 'livestock', label: 'Livestock' },
   { key: 'milk', label: 'Milk' },
   { key: 'expenses', label: 'Expenses' },
@@ -20,7 +16,7 @@ export async function render(container, params) {
   container.innerHTML = `<div class="empty-state">Loading report…</div>`;
 
   const report = await api.get(`/admin/reports/${reportId}`);
-  const state = { farmId: Number(farmId), report, activeTab: 'attendance' };
+  const state = { farmId: Number(farmId), report, activeTab: 'livestock' };
 
   container.innerHTML = `
     <div class="section-title">
@@ -67,7 +63,7 @@ export async function render(container, params) {
     renderTab(tabContent, state, () => render(container, params));
   }
   container.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => selectTab(t.dataset.tab)));
-  selectTab('attendance');
+  selectTab('livestock');
 }
 
 async function renderTab(container, state, reload) {
@@ -75,7 +71,6 @@ async function renderTab(container, state, reload) {
   const locked = state.report.status === 'SUBMITTED';
   try {
     switch (state.activeTab) {
-      case 'attendance': return await renderAttendance(container, state, reload, locked);
       case 'livestock': return await renderLivestock(container, state, reload, locked);
       case 'milk': return renderMilk(container, state, reload, locked);
       case 'expenses': return await renderExpenses(container, state, reload, locked);
@@ -84,54 +79,6 @@ async function renderTab(container, state, reload) {
   } catch (err) {
     container.innerHTML = `<div class="empty-state">${err.message}</div>`;
   }
-}
-
-// ── Attendance ──────────────────────────────────────────────────────────────
-
-async function renderAttendance(container, state, reload, locked) {
-  const workers = await api.get(`/farms/${state.farmId}/employees?isSalaried=true`);
-  const days = daysInMonth(state.report.year, state.report.month);
-  const byWorkerDay = new Map();
-  for (const a of state.report.attendance || []) byWorkerDay.set(`${a.workerId}-${a.dayOfMonth}`, a.status || (a.present ? 'P' : 'A'));
-
-  const dayHeaders = Array.from({ length: days }, (_, i) => `<th>${i + 1}</th>`).join('');
-  const rows = workers.map((w) => {
-    const cells = Array.from({ length: days }, (_, i) => {
-      const day = i + 1;
-      const current = byWorkerDay.get(`${w.id}-${day}`) || '';
-      return `<td><select data-worker="${w.id}" data-day="${day}" ${locked ? 'disabled' : ''}>
-        ${ATTENDANCE_STATUSES.map((s) => `<option value="${s}" ${s === current ? 'selected' : ''}>${s || '·'}</option>`).join('')}
-      </select></td>`;
-    }).join('');
-    return `<tr><td>${escapeHtml(w.fullName)}</td>${cells}</tr>`;
-  }).join('');
-
-  container.innerHTML = `
-    <p class="text-dim">P = present · A = absent · WA = work assignment · H = holiday · SL = sick leave · AL = annual leave</p>
-    <div class="table-scroll">
-      <table><thead><tr><th>Worker</th>${dayHeaders}</tr></thead><tbody>${rows || `<tr><td colspan="${days + 1}" class="empty-state">No active salaried employees on this farm</td></tr>`}</tbody></table>
-    </div>
-    ${!locked ? '<div class="modal-actions" style="justify-content:flex-start;margin-top:1rem"><button id="save-attendance">Save attendance</button></div>' : ''}
-  `;
-
-  container.querySelector('#save-attendance')?.addEventListener('click', async () => {
-    const entries = [];
-    container.querySelectorAll('select[data-worker]').forEach((sel) => {
-      if (!sel.value) return;
-      entries.push({
-        workerId: Number(sel.dataset.worker),
-        dayOfMonth: Number(sel.dataset.day),
-        present: PRESENT_STATUSES.has(sel.value),
-        status: sel.value,
-        notes: null,
-      });
-    });
-    try {
-      await api.put(`/admin/reports/${state.report.id}/attendance?farmId=${state.farmId}`, entries);
-      showToast('Attendance saved', 'success');
-      reload();
-    } catch (err) { showToast(err.message, 'error'); }
-  });
 }
 
 // ── Livestock ─────────────────────────────────────────────────────────────

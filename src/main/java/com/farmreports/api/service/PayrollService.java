@@ -44,7 +44,6 @@ public class PayrollService {
         List<PayrollEntry> seeded;
         if (!prevEntries.isEmpty()) {
             seeded = prevEntries.stream().map(prev -> {
-                int daysWorked = countDaysWorked(farmId, year, month, prev.getEmployeeId());
                 PayrollEntry e = new PayrollEntry();
                 e.setFarmId(farmId);
                 e.setYear(year);
@@ -52,7 +51,7 @@ public class PayrollService {
                 e.setEmployeeId(prev.getEmployeeId());
                 e.setSalaryRate(prev.getSalaryRate());
                 e.setLoans(prev.getLoans());
-                e.setDaysWorked(daysWorked);
+                e.setDaysWorked(0);
                 e.setAmountPaid(BigDecimal.ZERO);
                 // Carry forward any outstanding balance from the prior month
                 e.setAmountRemaining(prev.getAmountRemaining());
@@ -152,18 +151,6 @@ public class PayrollService {
                 ),
                 farmId, year
         );
-    }
-
-    private int countDaysWorked(Integer farmId, Integer year, Integer month, Integer employeeId) {
-        Integer count = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM attendance a " +
-                "JOIN monthly_reports mr ON a.report_id = mr.id " +
-                "WHERE mr.farm_id = ? AND mr.year = ? AND mr.month = ? " +
-                "AND a.worker_id = ? AND a.status IN ('P','WA')",
-                Integer.class,
-                farmId, year, month, employeeId
-        );
-        return count != null ? count : 0;
     }
 
     private PayrollRecordDto toDto(PayrollEntry e) {

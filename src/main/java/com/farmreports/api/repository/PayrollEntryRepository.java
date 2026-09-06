@@ -14,6 +14,8 @@ public interface PayrollEntryRepository extends JpaRepository<PayrollEntry, Inte
 
     List<PayrollEntry> findByFarmIdAndYearAndMonth(Integer farmId, Integer year, Integer month);
 
+    long countByFarmIdAndYearAndMonth(Integer farmId, Integer year, Integer month);
+
     List<PayrollEntry> findByFarmIdAndYearAndMonthOrderByEmployeeId(Integer farmId, Integer year, Integer month);
 
     Optional<PayrollEntry> findByFarmIdAndYearAndMonthAndEmployeeId(Integer farmId, Integer year, Integer month, Integer employeeId);

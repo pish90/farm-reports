@@ -32,6 +32,18 @@ public class SummaryController {
         return ApiResponse.ok(summaryService.getMilkSummary(farmId, year));
     }
 
+    @GetMapping("/milk/range")
+    public ApiResponse<List<MilkSummaryDto>> getMilkSummaryRange(
+            @RequestParam Integer farmId,
+            @RequestParam Integer startYear,
+            @RequestParam Integer startMonth,
+            @RequestParam Integer endYear,
+            @RequestParam Integer endMonth,
+            Authentication auth) {
+        checkFarmAccess(farmId, auth);
+        return ApiResponse.ok(summaryService.getMilkSummaryRange(farmId, startYear, startMonth, endYear, endMonth));
+    }
+
     @GetMapping("/livestock")
     public ApiResponse<List<LivestockSummaryDto>> getLivestockSummary(
             @RequestParam Integer farmId,

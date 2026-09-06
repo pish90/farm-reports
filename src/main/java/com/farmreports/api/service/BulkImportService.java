@@ -7,6 +7,8 @@ import com.farmreports.api.dto.MilkEntryRequest;
 import com.farmreports.api.dto.ReportDto;
 import com.farmreports.api.entity.Employee;
 import com.farmreports.api.entity.EmployeePayment;
+import com.farmreports.api.entity.Expense;
+import com.farmreports.api.entity.ExpenseCategory;
 import com.farmreports.api.entity.Farm;
 import com.farmreports.api.entity.LivestockCategory;
 import com.farmreports.api.entity.LivestockReturn;
@@ -16,13 +18,19 @@ import com.farmreports.api.entity.MonthlyReport;
 import com.farmreports.api.entity.PayrollEntry;
 import com.farmreports.api.repository.EmployeePaymentRepository;
 import com.farmreports.api.repository.EmployeeRepository;
+import com.farmreports.api.repository.ExpenseCategoryRepository;
+import com.farmreports.api.repository.ExpenseRepository;
 import com.farmreports.api.repository.FarmRepository;
 import com.farmreports.api.repository.LivestockTypeRepository;
 import com.farmreports.api.repository.MonthlyReportRepository;
 import com.farmreports.api.repository.PayrollEntryRepository;
 import lombok.RequiredArgsConstructor;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.DateUtil;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -34,21 +42,27 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.io.StringReader;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Bulk XLSX import for historical livestock and milk production figures, spanning many
- * farms/months in one file. Both importers validate every row first (no partial imports on
- * error) and, for rows that already have report data, merge into the existing counts/days
- * rather than wiping out livestock types or days the template doesn't cover.
+ * Bulk import for historical report data spanning many farms/months in one file. Livestock,
+ * milk, and expenses are XLSX-only (livestock/milk merge into existing counts/days rather than
+ * wiping out types or days the template doesn't cover); expenses also accepts CSV and is
+ * additive — every valid row is appended as a new expense record. All importers validate every
+ * row first, so a file with any invalid row writes nothing.
  */
 @Service
 @RequiredArgsConstructor
@@ -63,6 +77,10 @@ public class BulkImportService {
     private final PayrollEntryRepository payrollRepo;
     private final EmployeePaymentRepository paymentRepo;
     private final ReportService reportService;
+    private final ExpenseRepository expenseRepo;
+    private final ExpenseCategoryRepository expenseCategoryRepo;
+
+    private static final List<String> REQUIRED_EXPENSE_COLUMNS = List.of("farm", "date", "id", "amount");
 
     /** Marks employee_payments rows created by the pay importer, so a re-import can find and
      *  replace its own prior rows without touching payments recorded through the normal UI. */
@@ -574,7 +592,245 @@ public class BulkImportService {
         }
     }
 
+    // ── Expenses ─────────────────────────────────────────────────────────────
+
+    /**
+     * Imports historical expense records spanning many farms/months in one file, one row per
+     * expense. Unlike the livestock/milk grid importers, expense rows are additive: each valid
+     * row becomes a new {@link Expense} row appended to whatever that farm/month's report
+     * already has — nothing already recorded is deleted or overwritten.
+     *
+     * The "ID" column is the client's own receipt/voucher number, stored as {@code receiptNo}
+     * and used to keep re-imports idempotent: a row whose (farm, ID) already exists in the DB,
+     * or repeats an earlier row in the same file, is a row-level error rather than a silent
+     * skip or a duplicate insert.
+     */
+    @Transactional
+    public ImportResult importExpensesFromCsv(MultipartFile file, Integer userId) {
+        String content;
+        try {
+            content = new String(file.getBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not read CSV file");
+        }
+        if (!content.isEmpty() && content.charAt(0) == 0xFEFF) {
+            content = content.substring(1);
+        }
+
+        CSVFormat format = CSVFormat.DEFAULT.builder()
+                .setHeader()
+                .setSkipHeaderRecord(true)
+                .setIgnoreHeaderCase(true)
+                .setTrim(true)
+                .setIgnoreEmptyLines(true)
+                .build();
+
+        List<CSVRecord> records;
+        Map<String, String> headerByNormalized;
+        try (CSVParser parser = CSVParser.parse(new StringReader(content), format)) {
+            headerByNormalized = parser.getHeaderNames().stream()
+                    .collect(Collectors.toMap(BulkImportService::normalizeHeader, h -> h, (a, b) -> a));
+            records = parser.getRecords();
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Could not parse CSV: " + e.getMessage());
+        }
+
+        assertRequiredExpenseColumnsPresent(headerByNormalized.keySet());
+        if (records.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "CSV file has no data rows");
+        }
+        if (records.size() > MAX_IMPORT_ROWS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "CSV exceeds maximum of " + MAX_IMPORT_ROWS + " rows per import");
+        }
+
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (CSVRecord record : records) {
+            Map<String, String> fields = new LinkedHashMap<>();
+            for (Map.Entry<String, String> e : headerByNormalized.entrySet()) {
+                String v = record.get(e.getValue());
+                fields.put(e.getKey(), v != null && !v.isBlank() ? v.trim() : null);
+            }
+            rows.add(fields);
+        }
+
+        return runExpenseImport(rows, userId);
+    }
+
+    /** Same importer, reading the first sheet of an .xlsx workbook instead. */
+    @Transactional
+    public ImportResult importExpensesFromXlsx(MultipartFile file, Integer userId) {
+        List<Map<String, String>> rows;
+        try (Workbook workbook = openWorkbook(file)) {
+            Sheet sheet = workbook.getSheetAt(0);
+            Row headerRow = sheet.getRow(sheet.getFirstRowNum());
+            if (headerRow == null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "XLSX file has no header row");
+            }
+
+            Map<Integer, String> normalizedByColumn = new LinkedHashMap<>();
+            for (Cell cell : headerRow) {
+                String value = readCellAsString(cell);
+                if (value != null) normalizedByColumn.put(cell.getColumnIndex(), normalizeHeader(value));
+            }
+            assertRequiredExpenseColumnsPresent(new HashSet<>(normalizedByColumn.values()));
+
+            rows = new ArrayList<>();
+            for (int r = headerRow.getRowNum() + 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null || isRowBlank(row)) continue;
+
+                Map<String, String> fields = new LinkedHashMap<>();
+                for (Map.Entry<Integer, String> e : normalizedByColumn.entrySet()) {
+                    fields.put(e.getValue(), readCellAsString(row.getCell(e.getKey())));
+                }
+                rows.add(fields);
+            }
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error closing XLSX file");
+        }
+
+        if (rows.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "XLSX file has no data rows");
+        }
+        if (rows.size() > MAX_IMPORT_ROWS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "XLSX exceeds maximum of " + MAX_IMPORT_ROWS + " rows per import");
+        }
+
+        return runExpenseImport(rows, userId);
+    }
+
+    private void assertRequiredExpenseColumnsPresent(Set<String> normalizedHeaders) {
+        List<String> missing = REQUIRED_EXPENSE_COLUMNS.stream()
+                .filter(c -> !normalizedHeaders.contains(c))
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "File is missing required column(s): " + String.join(", ", missing));
+        }
+    }
+
+    private record PreparedExpense(Integer farmId, int year, int month, LocalDate date, String receiptNo,
+                                    String supplier, String description, ExpenseCategory category,
+                                    BigDecimal amount) {}
+
+    private ImportResult runExpenseImport(List<Map<String, String>> rows, Integer userId) {
+        Map<String, Farm> farmsByName = loadFarmsByName();
+        Map<String, ExpenseCategory> categoriesByName = expenseCategoryRepo.findAll().stream()
+                .collect(Collectors.toMap(c -> c.getAccountName().trim().toLowerCase(), c -> c, (a, b) -> a));
+        Map<String, ExpenseCategory> categoriesByCode = expenseCategoryRepo.findAll().stream()
+                .collect(Collectors.toMap(c -> c.getAccountCode().trim().toLowerCase(), c -> c, (a, b) -> a));
+
+        List<PreparedExpense> prepared = new ArrayList<>();
+        List<ImportRowError> errors = new ArrayList<>();
+        Set<String> seenInFile = new HashSet<>();
+        int rowNum = 1;
+
+        for (Map<String, String> fields : rows) {
+            rowNum++;
+            List<String> issues = new ArrayList<>();
+
+            String farmName = fields.get("farm");
+            String dateStr = fields.get("date");
+            String receiptNo = fields.get("id");
+            String supplier = fields.get("supplier");
+            String description = fields.get("productservice");
+            String categoryStr = fields.get("category");
+            String amountStr = fields.get("amount");
+
+            Farm farm = null;
+            if (farmName == null) {
+                issues.add("Farm is required");
+            } else {
+                farm = farmsByName.get(farmName.trim().toLowerCase());
+                if (farm == null) issues.add("Unknown farm: '" + farmName + "'");
+            }
+
+            LocalDate date = null;
+            if (dateStr == null) {
+                issues.add("Date is required");
+            } else {
+                try {
+                    date = LocalDate.parse(dateStr);
+                } catch (Exception e) {
+                    issues.add("Invalid date '" + dateStr + "' (expected yyyy-MM-dd)");
+                }
+            }
+
+            if (receiptNo == null) {
+                issues.add("ID is required");
+            }
+
+            BigDecimal amount = null;
+            if (amountStr == null) {
+                issues.add("Amount is required");
+            } else {
+                amount = parseNonNegativeDecimal(amountStr);
+                if (amount == null) issues.add("Invalid amount '" + amountStr + "'");
+            }
+
+            // An unrecognized category is left blank rather than rejecting the row — it can be
+            // assigned later by hand from the Reports UI.
+            ExpenseCategory category = null;
+            if (categoryStr != null) {
+                String key = categoryStr.trim().toLowerCase();
+                category = categoriesByName.getOrDefault(key, categoriesByCode.get(key));
+            }
+
+            String summary = (farmName != null ? farmName : "?") + " / " + (dateStr != null ? dateStr : "?")
+                    + " / " + (receiptNo != null ? receiptNo : "?");
+
+            if (farm != null && receiptNo != null) {
+                String dedupeKey = farm.getId() + "|" + receiptNo.trim().toLowerCase();
+                if (!seenInFile.add(dedupeKey)) {
+                    issues.add("Duplicate ID in file: '" + receiptNo + "' on " + farm.getName() + " appears more than once");
+                } else if (expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(farm.getId(), receiptNo.trim())) {
+                    issues.add("An expense with ID '" + receiptNo + "' already exists on " + farm.getName());
+                }
+            }
+
+            if (!issues.isEmpty()) {
+                errors.add(new ImportRowError(rowNum, summary, String.join("; ", issues)));
+                continue;
+            }
+
+            prepared.add(new PreparedExpense(farm.getId(), date.getYear(), date.getMonthValue(), date,
+                    receiptNo.trim(), supplier, description, category, amount));
+        }
+
+        if (!errors.isEmpty()) {
+            return new ImportResult(false, rows.size(), 0, errors);
+        }
+
+        Map<Integer, Integer> nextEntryNoByReportId = new LinkedHashMap<>();
+        int imported = 0;
+        for (PreparedExpense pe : prepared) {
+            ReportDto report = reportService.createOrGetReport(pe.farmId(), pe.year(), pe.month(), userId);
+            int entryNo = nextEntryNoByReportId.computeIfAbsent(report.id(),
+                    id -> expenseRepo.findMaxEntryNoByReportId(id) + 1);
+            nextEntryNoByReportId.put(report.id(), entryNo + 1);
+
+            Expense exp = new Expense();
+            exp.setReport(reportRepo.getReferenceById(report.id()));
+            exp.setEntryNo(entryNo);
+            exp.setDate(pe.date());
+            exp.setSupplierContractor(pe.supplier());
+            exp.setReceiptNo(pe.receiptNo());
+            exp.setCost(pe.amount());
+            exp.setDescription(pe.description());
+            exp.setCategory(pe.category());
+            expenseRepo.save(exp);
+            imported++;
+        }
+        return new ImportResult(true, rows.size(), imported, List.of());
+    }
+
     // ── Shared helpers ───────────────────────────────────────────────────────
+
+    private static String normalizeHeader(String s) {
+        return s.toLowerCase().replaceAll("[^a-z0-9]", "");
+    }
 
     private Workbook openWorkbook(MultipartFile file) {
         try {
@@ -646,6 +902,9 @@ public class BulkImportService {
         String value = switch (type) {
             case STRING -> cell.getStringCellValue();
             case NUMERIC -> {
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    yield cell.getLocalDateTimeCellValue().toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE);
+                }
                 double d = cell.getNumericCellValue();
                 yield (d == Math.floor(d) && !Double.isInfinite(d))
                         ? String.valueOf((long) d)

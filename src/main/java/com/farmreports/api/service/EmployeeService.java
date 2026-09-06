@@ -380,13 +380,15 @@ public class EmployeeService {
             boolean addsCasual = flags.casual() && !(existing != null && existing.isCasual())
                     && !(pending != null && pending.casual);
 
-            if (!addsSalaried && !addsCasual) {
-                String message = existing != null
-                        ? "Employee already exists on " + farm.getName() + ": "
-                                + firstName + (lastName != null ? " " + lastName : "")
-                        : "Duplicate row in file: " + firstName + (lastName != null ? " " + lastName : "")
-                                + " on " + farm.getName() + " appears more than once";
-                errors.add(new EmployeeCsvRowError(rowNum, rowSummary, message));
+            // A row for a brand-new hire that repeats an earlier row's employment type with
+            // nothing new to add is a real duplicate-row mistake. A row matching an employee
+            // who already exists in the DB is never an error, even without a new employment
+            // type: it's how the client re-uploads the roster to backfill personal details
+            // (phone, DOB, national ID, etc.) that a data cleanup may have wiped.
+            if (existing == null && pending != null && !addsSalaried && !addsCasual) {
+                errors.add(new EmployeeCsvRowError(rowNum, rowSummary,
+                        "Duplicate row in file: " + firstName + (lastName != null ? " " + lastName : "")
+                                + " on " + farm.getName() + " appears more than once"));
                 continue;
             }
 
@@ -396,14 +398,15 @@ public class EmployeeService {
             }
             pending.salaried = pending.salaried || flags.salaried();
             pending.casual = pending.casual || flags.casual();
-            // Non-identity fields: the last row in the file for this person wins.
-            pending.phone = phone;
-            pending.jobTitle = jobTitle;
-            pending.startDate = startDate;
-            pending.dateOfBirth = dateOfBirth;
-            pending.nationalId = nationalId;
-            pending.gender = gender;
-            pending.defaultDailyRate = defaultDailyRate;
+            // Non-identity fields: the last non-blank value in the file for this person wins,
+            // so a blank cell on a later row never erases a value an earlier row provided.
+            if (phone != null) pending.phone = phone;
+            if (jobTitle != null) pending.jobTitle = jobTitle;
+            if (startDate != null) pending.startDate = startDate;
+            if (dateOfBirth != null) pending.dateOfBirth = dateOfBirth;
+            if (nationalId != null) pending.nationalId = nationalId;
+            if (gender != null) pending.gender = gender;
+            if (defaultDailyRate != null) pending.defaultDailyRate = defaultDailyRate;
         }
 
         if (!errors.isEmpty()) {
@@ -421,9 +424,19 @@ public class EmployeeService {
                 createEmployee(pending.farm.getId(), request);
                 imported++;
             } else {
-                pending.existing.setSalaried(pending.existing.isSalaried() || pending.salaried);
-                pending.existing.setCasual(pending.existing.isCasual() || pending.casual);
-                employeeRepo.save(pending.existing);
+                Employee emp = pending.existing;
+                emp.setSalaried(emp.isSalaried() || pending.salaried);
+                emp.setCasual(emp.isCasual() || pending.casual);
+                // Backfill only — never overwrite a field that already has a value, so a
+                // repair upload can't clobber data that's already correct.
+                if (isBlank(emp.getPhone()) && pending.phone != null) emp.setPhone(pending.phone);
+                if (isBlank(emp.getJobTitle()) && pending.jobTitle != null) emp.setJobTitle(pending.jobTitle);
+                if (emp.getStartDate() == null && pending.startDate != null) emp.setStartDate(parseDate(pending.startDate));
+                if (emp.getDateOfBirth() == null && pending.dateOfBirth != null) emp.setDateOfBirth(parseDate(pending.dateOfBirth));
+                if (isBlank(emp.getNationalId()) && pending.nationalId != null) emp.setNationalId(pending.nationalId);
+                if (isBlank(emp.getGender()) && pending.gender != null) emp.setGender(pending.gender);
+                if (emp.getDefaultDailyRate() == null && pending.defaultDailyRate != null) emp.setDefaultDailyRate(pending.defaultDailyRate);
+                employeeRepo.save(emp);
                 merged++;
             }
         }
@@ -452,6 +465,10 @@ public class EmployeeService {
             this.firstName = firstName;
             this.lastName = lastName;
         }
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
     }
 
     private static String normalizeHeader(String s) {
@@ -606,6 +623,21 @@ public class EmployeeService {
                 outstanding,
                 payments
         );
+    }
+
+    /** Annual payroll for every salaried employee on a farm — the "Payroll" tab on a report's
+     *  detail page reuses this rather than an attendance-tied view, tracking each employee's
+     *  earnings/payments for the whole year, not just the report's own month. */
+    @Transactional(readOnly = true)
+    public List<EmployeeAnnualPayrollDto> getFarmAnnualPayroll(Integer farmId, Integer year) {
+        return employeeRepo.findByFarmIdAndSalariedTrueOrderByFirstNameAscLastNameAsc(farmId).stream()
+                .map(emp -> new EmployeeAnnualPayrollDto(
+                        emp.getId(),
+                        emp.getFullName(),
+                        emp.getLsNumber(),
+                        emp.getStatus(),
+                        getEmployeeLedger(farmId, emp.getId(), year)))
+                .toList();
     }
 
     @Transactional(readOnly = true)
