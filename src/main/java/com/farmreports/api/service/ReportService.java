@@ -11,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
@@ -167,51 +166,6 @@ public class ReportService {
         casualAttendanceRepository.saveAll(records);
     }
 
-    public ReportDto submitReport(Integer reportId, Integer farmId) {
-        MonthlyReport report = loadReportForFarm(reportId, farmId);
-
-        if (report.getStatus() == ReportStatus.SUBMITTED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Report already submitted");
-        }
-        if (report.getLivestockReturns().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Livestock section must not be empty before submitting");
-        }
-        if (report.getMilkProduction().isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Milk production section must not be empty before submitting");
-        }
-
-        report.setStatus(ReportStatus.SUBMITTED);
-        report.setSubmittedAt(LocalDateTime.now());
-
-        return toDto(reportRepository.save(report));
-    }
-
-    public ReportDto reopenReport(Integer reportId, Integer farmId) {
-        MonthlyReport report = loadReportForFarm(reportId, farmId);
-
-        if (report.getStatus() != ReportStatus.SUBMITTED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Report is not submitted");
-        }
-
-        report.setStatus(ReportStatus.DRAFT);
-        report.setSubmittedAt(null);
-
-        return toDto(reportRepository.save(report));
-    }
-
-    public ReportDto adminReopenReport(Integer reportId) {
-        MonthlyReport report = reportRepository.findById(reportId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Report not found"));
-        if (report.getStatus() != ReportStatus.SUBMITTED) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Report is not submitted");
-        }
-        report.setStatus(ReportStatus.DRAFT);
-        report.setSubmittedAt(null);
-        return toDto(reportRepository.save(report));
-    }
-
     @Transactional(readOnly = true)
     public ReportDto getReportById(Integer id, Integer farmId, String role) {
         MonthlyReport report;
@@ -294,8 +248,6 @@ public class ReportService {
                 report.getFarm().getId(),
                 report.getYear(),
                 report.getMonth(),
-                report.getStatus().name(),
-                report.getSubmittedAt(),
                 report.getCreatedAt(),
                 livestock,
                 milk,

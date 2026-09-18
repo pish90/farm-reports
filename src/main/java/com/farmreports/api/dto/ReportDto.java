@@ -11,8 +11,6 @@ public record ReportDto(
         Integer farmId,
         Integer year,
         Integer month,
-        String status,
-        LocalDateTime submittedAt,
         LocalDateTime createdAt,
         List<LivestockRecordDto> livestock,
         List<MilkRecordDto> milk,

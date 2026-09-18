@@ -233,13 +233,12 @@ public class AdminController {
             @RequestParam(required = false) Integer farmId,
             @RequestParam(required = false) Integer year,
             @RequestParam(required = false) Integer month,
-            @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
             Authentication auth) {
         requireDashboardRole(auth);
         Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? farmId : ClaimsHelper.getFarmId(auth);
-        return ApiResponse.ok(adminService.listReports(effectiveFarmId, year, month, status, page, size));
+        return ApiResponse.ok(adminService.listReports(effectiveFarmId, year, month, page, size));
     }
 
     // ── Expenses (standalone page, spans reports) ──────────────────────────────
@@ -362,30 +361,6 @@ public class AdminController {
         auditService.log(AuditAction.LIVESTOCK_NOTES_UPDATED, auth, farmId, null,
                 "MonthlyReport", String.valueOf(id), "Livestock notes updated");
         return ApiResponse.ok();
-    }
-
-    @PostMapping("/reports/{id}/submit")
-    public ApiResponse<ReportDto> adminSubmitReport(
-            @PathVariable Integer id,
-            @RequestParam Integer farmId,
-            Authentication auth) {
-        requireDashboardRole(auth);
-        checkFarmAccessOrOpsBypass(farmId, auth);
-        ReportDto report = reportService.submitReport(id, farmId);
-        auditService.log(AuditAction.REPORT_SUBMITTED, auth, farmId, null,
-                "MonthlyReport", String.valueOf(id), "Report submitted");
-        return ApiResponse.ok(report);
-    }
-
-    @PostMapping("/reports/{id}/reopen")
-    public ApiResponse<ReportDto> adminReopenReport(
-            @PathVariable Integer id,
-            Authentication auth) {
-        requireAdmin(auth);
-        ReportDto report = reportService.adminReopenReport(id);
-        auditService.log(AuditAction.REPORT_REOPENED, auth, null, null,
-                "MonthlyReport", String.valueOf(id), "Report reopened");
-        return ApiResponse.ok(report);
     }
 
     // ── Excel export ───────────────────────────────────────────────────────────

@@ -150,7 +150,7 @@ class AdminServiceTest {
 
         Farm matunda = farm(1, "Matunda");
         when(farmRepository.findById(1)).thenReturn(Optional.of(matunda));
-        lenient().when(reportRepository.findFirstByFarm_IdAndStatusOrderBySubmittedAtDesc(anyInt(), any()))
+        lenient().when(reportRepository.findFirstByFarm_IdOrderByCreatedAtDesc(anyInt()))
                 .thenReturn(Optional.empty());
         lenient().when(reportRepository.countByFarm_IdAndYear(anyInt(), anyInt())).thenReturn(0L);
 
@@ -168,7 +168,7 @@ class AdminServiceTest {
                 payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder);
 
         when(farmRepository.findAll()).thenReturn(List.of(farm(1, "Matunda"), farm(2, "Les A")));
-        lenient().when(reportRepository.findFirstByFarm_IdAndStatusOrderBySubmittedAtDesc(anyInt(), any()))
+        lenient().when(reportRepository.findFirstByFarm_IdOrderByCreatedAtDesc(anyInt()))
                 .thenReturn(Optional.empty());
         lenient().when(reportRepository.countByFarm_IdAndYear(anyInt(), anyInt())).thenReturn(0L);
 

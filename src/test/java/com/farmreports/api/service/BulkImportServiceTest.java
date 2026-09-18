@@ -136,7 +136,7 @@ class BulkImportServiceTest {
         report.getLivestockReturns().add(existing);
 
         when(reportService.createOrGetReport(1, 2026, 1, 99)).thenReturn(
-                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+                new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
         when(reportRepo.findById(55)).thenReturn(Optional.of(report));
 
         ImportResult result = bulkImportService.importLivestockFromXlsx(file, 2026, 99);
@@ -214,7 +214,7 @@ class BulkImportServiceTest {
         report.getMilkProduction().add(existing);
 
         when(reportService.createOrGetReport(1, 2026, 1, 99)).thenReturn(
-                new ReportDto(60, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+                new ReportDto(60, 1, 2026, 1, null, null, null, null, null));
         when(reportRepo.findById(60)).thenReturn(Optional.of(report));
 
         ImportResult result = bulkImportService.importMilkFromXlsx(file, 2026, 99);
@@ -484,7 +484,7 @@ class BulkImportServiceTest {
         when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(3);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
-                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+                new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
         when(reportRepo.getReferenceById(55)).thenReturn(new MonthlyReport());
 
         String csv = "farm,date,ID,supplier,product/service,category,amount\n"
@@ -535,7 +535,7 @@ class BulkImportServiceTest {
         when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1002")).thenReturn(false);
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
-                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+                new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
 
         String csv = "farm,date,ID,supplier,product/service,category,amount\n"
                 + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,,5400.00\n"
@@ -577,7 +577,7 @@ class BulkImportServiceTest {
         when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
-                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+                new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
         when(reportRepo.getReferenceById(55)).thenReturn(new MonthlyReport());
 
         String csv = "farm,date,ID,supplier,product/service,category,amount\n"

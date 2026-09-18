@@ -1,7 +1,6 @@
 package com.farmreports.api.repository;
 
 import com.farmreports.api.entity.MonthlyReport;
-import com.farmreports.api.entity.ReportStatus;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -22,7 +21,7 @@ public interface MonthlyReportRepository extends JpaRepository<MonthlyReport, In
     @Query("SELECT r FROM MonthlyReport r WHERE r.id = :id AND r.farm.id = :farmId")
     Optional<MonthlyReport> findByIdAndFarmIdForUpdate(@Param("id") Integer id, @Param("farmId") Integer farmId);
 
-    Optional<MonthlyReport> findFirstByFarm_IdAndStatusOrderBySubmittedAtDesc(Integer farmId, ReportStatus status);
+    Optional<MonthlyReport> findFirstByFarm_IdOrderByCreatedAtDesc(Integer farmId);
 
     long countByFarm_IdAndYear(Integer farmId, Integer year);
 }
