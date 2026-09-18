@@ -227,7 +227,7 @@ public class BulkImportService {
         }
 
         if (!errors.isEmpty()) {
-            return new ImportResult(false, dataRowCount, 0, errors);
+            return new ImportResult(false, dataRowCount, 0, 0, errors);
         }
 
         int imported = 0;
@@ -248,7 +248,7 @@ public class BulkImportService {
             reportService.upsertLivestock(report.id(), row.farmId(), entries);
             imported++;
         }
-        return new ImportResult(true, dataRowCount, imported, List.of());
+        return new ImportResult(true, dataRowCount, imported, 0, List.of());
     }
 
     // ── Milk ─────────────────────────────────────────────────────────────────
@@ -358,7 +358,7 @@ public class BulkImportService {
         }
 
         if (!errors.isEmpty()) {
-            return new ImportResult(false, dataRowCount, 0, errors);
+            return new ImportResult(false, dataRowCount, 0, 0, errors);
         }
 
         int imported = 0;
@@ -379,7 +379,7 @@ public class BulkImportService {
             reportService.upsertMilk(report.id(), row.farmId(), entries);
             imported++;
         }
-        return new ImportResult(true, dataRowCount, imported, List.of());
+        return new ImportResult(true, dataRowCount, imported, 0, List.of());
     }
 
     // ── Employee pay ─────────────────────────────────────────────────────────
@@ -537,7 +537,7 @@ public class BulkImportService {
         }
 
         if (!errors.isEmpty()) {
-            return new ImportResult(false, dataRowCount, 0, errors);
+            return new ImportResult(false, dataRowCount, 0, 0, errors);
         }
 
         int imported = 0;
@@ -552,7 +552,7 @@ public class BulkImportService {
             }
             imported++;
         }
-        return new ImportResult(true, dataRowCount, imported, List.of());
+        return new ImportResult(true, dataRowCount, imported, 0, List.of());
     }
 
     /**
@@ -647,9 +647,11 @@ public class BulkImportService {
      * already has — nothing already recorded is deleted or overwritten.
      *
      * The "ID" column is the client's own receipt/voucher number, stored as {@code receiptNo}
-     * and used to keep re-imports idempotent: a row whose (farm, ID) already exists in the DB,
-     * or repeats an earlier row in the same file, is a row-level error rather than a silent
-     * skip or a duplicate insert.
+     * and used to keep re-imports idempotent: a row whose (farm, ID) already exists in the DB is
+     * silently skipped (counted in {@link ImportResult#skippedCount}, not an error) rather than
+     * blocking the whole batch, so re-uploading a file that mixes old and new rows only adds
+     * what's new. A row repeating an earlier row within the same file is still a row-level error,
+     * since it's ambiguous which of the two to keep.
      */
     @Transactional
     public ImportResult importExpensesFromCsv(MultipartFile file, Integer userId) {
@@ -772,6 +774,7 @@ public class BulkImportService {
         List<ImportRowError> errors = new ArrayList<>();
         Set<String> seenInFile = new HashSet<>();
         int rowNum = 1;
+        int skipped = 0;
 
         for (Map<String, String> fields : rows) {
             rowNum++;
@@ -827,13 +830,22 @@ public class BulkImportService {
             String summary = (farmName != null ? farmName : "?") + " / " + (dateStr != null ? dateStr : "?")
                     + " / " + (receiptNo != null ? receiptNo : "?");
 
+            boolean alreadyImported = false;
             if (farm != null && receiptNo != null) {
                 String dedupeKey = farm.getId() + "|" + receiptNo.trim().toLowerCase();
                 if (!seenInFile.add(dedupeKey)) {
                     issues.add("Duplicate ID in file: '" + receiptNo + "' on " + farm.getName() + " appears more than once");
                 } else if (expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(farm.getId(), receiptNo.trim())) {
-                    issues.add("An expense with ID '" + receiptNo + "' already exists on " + farm.getName());
+                    alreadyImported = true;
                 }
+            }
+
+            // A row matching an expense already in the DB is skipped rather than rejected, so
+            // re-uploading a file that mixes previously-imported rows with new ones only adds
+            // what's new instead of failing the whole batch — see class-level note on receiptNo.
+            if (alreadyImported) {
+                skipped++;
+                continue;
             }
 
             if (!issues.isEmpty()) {
@@ -846,7 +858,7 @@ public class BulkImportService {
         }
 
         if (!errors.isEmpty()) {
-            return new ImportResult(false, rows.size(), 0, errors);
+            return new ImportResult(false, rows.size(), 0, skipped, errors);
         }
 
         Map<Integer, Integer> nextEntryNoByReportId = new LinkedHashMap<>();
@@ -869,7 +881,7 @@ public class BulkImportService {
             expenseRepo.save(exp);
             imported++;
         }
-        return new ImportResult(true, rows.size(), imported, List.of());
+        return new ImportResult(true, rows.size(), imported, skipped, List.of());
     }
 
     // ── Shared helpers ───────────────────────────────────────────────────────

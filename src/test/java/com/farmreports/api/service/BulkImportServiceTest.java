@@ -510,7 +510,7 @@ class BulkImportServiceTest {
     }
 
     @Test
-    void importExpensesFromCsv_duplicateIdAlreadyInDb_rejectsRowAndWritesNothing() {
+    void importExpensesFromCsv_duplicateIdAlreadyInDb_skipsRowWithoutFailingBatch() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of());
         when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001")).thenReturn(true);
@@ -520,10 +520,35 @@ class BulkImportServiceTest {
 
         ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
 
-        assertThat(result.success()).isFalse();
-        assertThat(result.errors()).hasSize(1);
-        assertThat(result.errors().get(0).message()).contains("already exists");
+        assertThat(result.success()).isTrue();
+        assertThat(result.errors()).isEmpty();
+        assertThat(result.importedCount()).isEqualTo(0);
+        assertThat(result.skippedCount()).isEqualTo(1);
         verify(expenseRepo, never()).save(any());
+    }
+
+    @Test
+    void importExpensesFromCsv_mixOfNewAndAlreadyImportedRows_importsOnlyNewOnes() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of());
+        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001")).thenReturn(true);
+        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1002")).thenReturn(false);
+        when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
+        when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
+                new ReportDto(55, 1, 2026, 1, "DRAFT", null, null, null, null, null, null));
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,,5400.00\n"
+                + "Matunda,2026-01-16,INV-1002,ABC Traders,Diesel,,900\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.importedCount()).isEqualTo(1);
+        assertThat(result.skippedCount()).isEqualTo(1);
+        ArgumentCaptor<Expense> captor = ArgumentCaptor.forClass(Expense.class);
+        verify(expenseRepo).save(captor.capture());
+        assertThat(captor.getValue().getReceiptNo()).isEqualTo("INV-1002");
     }
 
     @Test
