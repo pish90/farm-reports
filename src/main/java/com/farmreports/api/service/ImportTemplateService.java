@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Builds downloadable example .xlsx templates for the four ADMIN bulk importers, generated from
@@ -333,15 +334,18 @@ public class ImportTemplateService {
                     .filter(e -> e.getLsNumber() != null && e.getLsNumber().matches("^LS\\d+[A-Z]$"))
                     .toList();
 
-            Row lsRow = sheet.createRow(0);
+            Map<String, Long> nameCounts = employees.stream()
+                    .collect(Collectors.groupingBy(e -> e.getFullName().trim().toLowerCase(), Collectors.counting()));
+
+            Row nameRow = sheet.createRow(0);
             Row subHeaderRow = sheet.createRow(1);
             setCell(subHeaderRow, 0, "Month", styles.header);
 
             int col = 1;
             for (Employee emp : employees) {
-                String bareLs = emp.getLsNumber().substring(0, emp.getLsNumber().length() - 1);
-                setCell(lsRow, col, bareLs, styles.header);
-                setCell(lsRow, col + 1, "", styles.header);
+                String headerKey = employeeHeaderKey(emp, nameCounts);
+                setCell(nameRow, col, headerKey, styles.header);
+                setCell(nameRow, col + 1, "", styles.header);
                 setCell(subHeaderRow, col, "Earned", styles.header);
                 setCell(subHeaderRow, col + 1, "Paid", styles.header);
                 sheet.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(0, 0, col, col + 1));
@@ -358,24 +362,29 @@ public class ImportTemplateService {
             for (int i = 0; i < col; i++) sheet.autoSizeColumn(i);
             sheet.createFreezePane(1, 2);
 
-            Sheet lookup = wb.createSheet("Employee LS Lookup");
+            Sheet lookup = wb.createSheet("Employee Reference");
             Row lookupHeader = lookup.createRow(0);
-            setCell(lookupHeader, 0, "LS Number", styles.header);
-            setCell(lookupHeader, 1, "Farm", styles.header);
-            setCell(lookupHeader, 2, "Name", styles.header);
+            setCell(lookupHeader, 0, "Column Header", styles.header);
+            setCell(lookupHeader, 1, "Name", styles.header);
+            setCell(lookupHeader, 2, "Farm", styles.header);
+            setCell(lookupHeader, 3, "LS Number", styles.header);
             int r = 1;
             for (Employee emp : employees) {
                 Row row = lookup.createRow(r++);
-                setCell(row, 0, emp.getLsNumber().substring(0, emp.getLsNumber().length() - 1), styles.plain);
-                setCell(row, 1, emp.getFarm().getName(), styles.plain);
-                setCell(row, 2, emp.getFullName(), styles.plain);
+                setCell(row, 0, employeeHeaderKey(emp, nameCounts), styles.plain);
+                setCell(row, 1, emp.getFullName(), styles.plain);
+                setCell(row, 2, emp.getFarm().getName(), styles.plain);
+                setCell(row, 3, emp.getLsNumber().substring(0, emp.getLsNumber().length() - 1), styles.plain);
             }
-            for (int i = 0; i < 3; i++) lookup.autoSizeColumn(i);
+            for (int i = 0; i < 4; i++) lookup.autoSizeColumn(i);
 
             Sheet notes = wb.createSheet("Instructions");
             writeInstructions(notes, styles, "Employee pay import (XLSX only)", List.of(
-                    "Two header rows: row 1 has each employee's bare LS number (no farm-letter suffix), row 2 has Earned/Paid sub-columns.",
-                    "The 'Employee LS Lookup' sheet maps each LS number to the employee's name and farm for reference.",
+                    "Two header rows: row 1 has each employee's full name, row 2 has Earned/Paid sub-columns.",
+                    "If two employees share the same name across different farms, their columns are headed \"Name (Farm)\" " +
+                            "instead — check the 'Employee Reference' sheet if unsure which column is which.",
+                    "The 'Employee Reference' sheet maps each column header to the employee's name, farm, and LS number for reference. " +
+                            "Bare LS numbers (e.g. 'LS2001') are still accepted as column headers too, for older spreadsheets.",
                     "One data row per calendar month, in sequence, starting from the (year, month) you choose in the upload dialog " +
                             "(e.g. if you pick 2026-01, row 1 of data = Jan 2026, row 2 = Feb 2026, and so on).",
                     "The Month label in column A must match the expected month for that row's position — it's a cross-check, not free text.",
@@ -389,6 +398,15 @@ public class ImportTemplateService {
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not build template");
         }
+    }
+
+    /** The Employee pay import column header for this employee: their full name, or
+     *  "Name (Farm)" when that name is shared by employees on more than one farm — must match
+     *  {@link BulkImportService}'s header-resolution logic exactly. */
+    private String employeeHeaderKey(Employee emp, Map<String, Long> nameCounts) {
+        String name = emp.getFullName();
+        long count = nameCounts.getOrDefault(name.trim().toLowerCase(), 0L);
+        return count > 1 ? name + " (" + emp.getFarm().getName() + ")" : name;
     }
 
     // ── Shared helpers ───────────────────────────────────────────────────────

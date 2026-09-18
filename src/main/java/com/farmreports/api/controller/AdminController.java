@@ -258,6 +258,18 @@ public class AdminController {
         return ApiResponse.ok(adminService.listExpenses(effectiveFarmId, year, month, categoryId, page, size));
     }
 
+    @DeleteMapping("/expenses/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteExpense(@PathVariable Integer id, Authentication auth) {
+        requireAdmin(auth);
+        ExpenseListItemDto deleted = adminService.deleteExpense(id);
+        auditService.log(AuditAction.EXPENSE_DELETED, auth, deleted.farmId(), deleted.farmName(),
+                "Expense", String.valueOf(id),
+                "Expense deleted: " + (deleted.description() != null ? deleted.description() : "—")
+                        + " (" + deleted.cost() + ", " + deleted.farmName() + " "
+                        + deleted.year() + "-" + String.format("%02d", deleted.month()) + ")");
+    }
+
     // ── Admin report read/create ───────────────────────────────────────────────
 
     @GetMapping("/farms/{farmId}/report")

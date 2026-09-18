@@ -358,6 +358,111 @@ class BulkImportServiceTest {
         assertThat(result.errors().get(0).message()).contains("Unknown LS number 'LS9999'");
     }
 
+    private static Employee employee(int id, String lsNumber, Farm farm, String firstName, String lastName) {
+        Employee e = employee(id, lsNumber, farm);
+        e.setFirstName(firstName);
+        e.setLastName(lastName);
+        return e;
+    }
+
+    @Test
+    void importEmployeePay_nameHeader_resolvesUniqueName() throws IOException {
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sheet = wb.createSheet("Employee pay_import");
+        Row nameRow = sheet.createRow(0);
+        nameRow.createCell(1).setCellValue("Jane Doe");
+        nameRow.createCell(2).setCellValue("Jane Doe");
+        Row subRow = sheet.createRow(1);
+        subRow.createCell(1).setCellValue("Earned");
+        subRow.createCell(2).setCellValue("Paid");
+        Row data = sheet.createRow(2);
+        data.createCell(0).setCellValue("Jan");
+        data.createCell(1).setCellValue(50000);
+        data.createCell(2).setCellValue(20000);
+        MockMultipartFile file = toXlsx(wb, "pay.xlsx");
+
+        Employee jane = employee(7, "LS2001M", matunda, "Jane", "Doe");
+        when(employeeRepo.findAll()).thenReturn(List.of(jane));
+        when(payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(1, 2026, 1, 7)).thenReturn(Optional.empty());
+        when(paymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(7), eq(1), any(), any()))
+                .thenReturn(List.of());
+
+        ImportResult result = bulkImportService.importEmployeePayFromXlsx(file, 2026, 1, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.importedCount()).isEqualTo(1);
+        ArgumentCaptor<PayrollEntry> entryCaptor = ArgumentCaptor.forClass(PayrollEntry.class);
+        verify(payrollRepo).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getEmployeeId()).isEqualTo(7);
+    }
+
+    @Test
+    void importEmployeePay_nameWithFarmSuffix_disambiguatesAcrossFarms() throws IOException {
+        Farm lesA = new Farm();
+        lesA.setId(2);
+        lesA.setName("Les A");
+
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sheet = wb.createSheet("Employee pay_import");
+        Row nameRow = sheet.createRow(0);
+        nameRow.createCell(1).setCellValue("Jane Doe (Les A)");
+        nameRow.createCell(2).setCellValue("Jane Doe (Les A)");
+        Row subRow = sheet.createRow(1);
+        subRow.createCell(1).setCellValue("Earned");
+        subRow.createCell(2).setCellValue("Paid");
+        Row data = sheet.createRow(2);
+        data.createCell(0).setCellValue("Jan");
+        data.createCell(1).setCellValue(50000);
+        data.createCell(2).setCellValue(20000);
+        MockMultipartFile file = toXlsx(wb, "pay.xlsx");
+
+        Employee janeMatunda = employee(7, "LS2001M", matunda, "Jane", "Doe");
+        Employee janeLesA = employee(8, "LS2002A", lesA, "Jane", "Doe");
+        when(employeeRepo.findAll()).thenReturn(List.of(janeMatunda, janeLesA));
+        when(payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(2, 2026, 1, 8)).thenReturn(Optional.empty());
+        when(paymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(8), eq(2), any(), any()))
+                .thenReturn(List.of());
+
+        ImportResult result = bulkImportService.importEmployeePayFromXlsx(file, 2026, 1, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<PayrollEntry> entryCaptor = ArgumentCaptor.forClass(PayrollEntry.class);
+        verify(payrollRepo).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getEmployeeId()).isEqualTo(8);
+        assertThat(entryCaptor.getValue().getFarmId()).isEqualTo(2);
+    }
+
+    @Test
+    void importEmployeePay_ambiguousNameWithoutFarm_reportsRowError() throws IOException {
+        Farm lesA = new Farm();
+        lesA.setId(2);
+        lesA.setName("Les A");
+
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sheet = wb.createSheet("Employee pay_import");
+        Row nameRow = sheet.createRow(0);
+        nameRow.createCell(1).setCellValue("Jane Doe");
+        nameRow.createCell(2).setCellValue("Jane Doe");
+        Row subRow = sheet.createRow(1);
+        subRow.createCell(1).setCellValue("Earned");
+        subRow.createCell(2).setCellValue("Paid");
+        Row data = sheet.createRow(2);
+        data.createCell(0).setCellValue("Jan");
+        data.createCell(1).setCellValue(50000);
+        data.createCell(2).setCellValue(20000);
+        MockMultipartFile file = toXlsx(wb, "pay.xlsx");
+
+        Employee janeMatunda = employee(7, "LS2001M", matunda, "Jane", "Doe");
+        Employee janeLesA = employee(8, "LS2002A", lesA, "Jane", "Doe");
+        when(employeeRepo.findAll()).thenReturn(List.of(janeMatunda, janeLesA));
+
+        ImportResult result = bulkImportService.importEmployeePayFromXlsx(file, 2026, 1, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errors().get(0).message()).contains("matches employees on multiple farms");
+        verify(payrollRepo, never()).save(any());
+    }
+
     // ── Expenses ─────────────────────────────────────────────────────────────
 
     private static ExpenseCategory category(int id, String code, String name) {

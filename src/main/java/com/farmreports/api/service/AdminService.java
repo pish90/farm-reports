@@ -165,4 +165,28 @@ public class AdminService {
                 .toList();
         return new PageDto<>(content, result.getTotalElements(), result.getTotalPages(), page, size);
     }
+
+    /** Deletes a single expense (ADMIN only, standalone Expenses page). Returns the
+     *  deleted row's data for the audit log, since the expense itself is gone after this call. */
+    @Transactional
+    public ExpenseListItemDto deleteExpense(Integer id) {
+        Expense expense = expenseRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Expense not found"));
+        ExpenseListItemDto dto = new ExpenseListItemDto(
+                expense.getId(),
+                expense.getReport().getId(),
+                expense.getReport().getFarm().getId(),
+                expense.getReport().getFarm().getName(),
+                expense.getReport().getYear(),
+                expense.getReport().getMonth(),
+                expense.getDate(),
+                expense.getReceiptNo(),
+                expense.getSupplierContractor(),
+                expense.getDescription(),
+                expense.getCategory() != null ? expense.getCategory().getAccountName() : null,
+                expense.getCost()
+        );
+        expenseRepository.delete(expense);
+        return dto;
+    }
 }

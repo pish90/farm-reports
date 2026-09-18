@@ -386,11 +386,14 @@ public class BulkImportService {
 
     /**
      * Imports the "Employee pay_import" sheet: one row per calendar month, one Earned/Paid
-     * column pair per employee (headed by their bare LS number, e.g. "LS2001" — without the
-     * farm-letter suffix employees.ls_number actually carries). The sheet has no year column
-     * and month labels repeat across years, so the caller supplies the (year, month) the first
-     * data row represents; every subsequent row is assumed to be the next calendar month in
-     * sequence, cross-checked against its own Month label.
+     * column pair per employee, headed by the employee's full name (e.g. "John Mwangi"; disambiguated
+     * as "John Mwangi (Kenlet)" when the same name exists on more than one farm — see
+     * {@link ImportTemplateService#buildEmployeePayTemplate}). Bare LS numbers (e.g. "LS2001", without the farm-letter suffix
+     * employees.ls_number actually carries) are still accepted for backward compatibility with
+     * already-in-progress spreadsheets. The sheet has no year column and month labels repeat
+     * across years, so the caller supplies the (year, month) the first data row represents; every
+     * subsequent row is assumed to be the next calendar month in sequence, cross-checked against
+     * its own Month label.
      *
      * "Earned" is written to payroll_entries.gross_salary and "Paid" to both
      * payroll_entries.amount_paid (read by the Payroll tab) and a tagged employee_payments row
@@ -410,44 +413,44 @@ public class BulkImportService {
     private ImportResult doImportEmployeePay(Sheet sheet, Integer startYear, Integer startMonth, String paidByName) {
         int headerRow1Num = sheet.getFirstRowNum();
         int headerRow2Num = headerRow1Num + 1;
-        Row lsNumberRow = sheet.getRow(headerRow1Num);
+        Row headerRow = sheet.getRow(headerRow1Num);
         Row subHeaderRow = sheet.getRow(headerRow2Num);
-        if (lsNumberRow == null || subHeaderRow == null) {
+        if (headerRow == null || subHeaderRow == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "XLSX file must have two header rows (LS number, then Earned/Paid)");
+                    "XLSX file must have two header rows (employee name, then Earned/Paid)");
         }
 
-        int lastCol = Math.max(lsNumberRow.getLastCellNum(), subHeaderRow.getLastCellNum());
-        Map<Integer, String> lsNumberByColumn = new LinkedHashMap<>();
-        String currentLsNumber = null;
+        int lastCol = Math.max(headerRow.getLastCellNum(), subHeaderRow.getLastCellNum());
+        Map<Integer, String> headerKeyByColumn = new LinkedHashMap<>();
+        String currentHeaderKey = null;
         for (int col = 1; col < lastCol; col++) {
-            String v = readCellAsString(lsNumberRow.getCell(col));
-            if (v != null) currentLsNumber = v.trim().toUpperCase();
-            if (currentLsNumber != null) lsNumberByColumn.put(col, currentLsNumber);
+            String v = readCellAsString(headerRow.getCell(col));
+            if (v != null) currentHeaderKey = v.trim();
+            if (currentHeaderKey != null) headerKeyByColumn.put(col, currentHeaderKey);
         }
 
-        record EmployeeColumns(String lsNumber, Integer earnedCol, Integer paidCol) {}
-        Map<String, int[]> colsByLsNumber = new LinkedHashMap<>(); // [earnedCol, paidCol], -1 = missing
+        record EmployeeColumns(String headerKey, Integer earnedCol, Integer paidCol) {}
+        Map<String, int[]> colsByHeaderKey = new LinkedHashMap<>(); // [earnedCol, paidCol], -1 = missing
         for (int col = 1; col < lastCol; col++) {
             String sub = readCellAsString(subHeaderRow.getCell(col));
             if (sub == null) continue;
             String normalized = sub.trim().toLowerCase();
-            String lsNumber = lsNumberByColumn.get(col);
-            if (lsNumber == null) continue; // stray Earned/Paid column with no LS number above it
+            String headerKey = headerKeyByColumn.get(col);
+            if (headerKey == null) continue; // stray Earned/Paid column with no name/LS number above it
 
-            int[] pair = colsByLsNumber.computeIfAbsent(lsNumber, k -> new int[]{-1, -1});
+            int[] pair = colsByHeaderKey.computeIfAbsent(headerKey, k -> new int[]{-1, -1});
             if (normalized.startsWith("earned")) {
                 pair[0] = col;
             } else if (normalized.startsWith("paid")) {
                 pair[1] = col;
             }
         }
-        if (colsByLsNumber.isEmpty()) {
+        if (colsByHeaderKey.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "XLSX file has no recognizable Earned/Paid employee columns");
         }
         List<EmployeeColumns> employeeColumns = new ArrayList<>();
-        for (Map.Entry<String, int[]> e : colsByLsNumber.entrySet()) {
+        for (Map.Entry<String, int[]> e : colsByHeaderKey.entrySet()) {
             if (e.getValue()[0] == -1 || e.getValue()[1] == -1) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                         "Employee column '" + e.getKey() + "' is missing its Earned or Paid sub-column");
@@ -455,11 +458,19 @@ public class BulkImportService {
             employeeColumns.add(new EmployeeColumns(e.getKey(), e.getValue()[0], e.getValue()[1]));
         }
 
-        Map<String, Employee> employeesByLsNumber = employeeRepo.findAll().stream()
+        List<Employee> validEmployees = employeeRepo.findAll().stream()
                 .filter(emp -> emp.getLsNumber() != null && emp.getLsNumber().matches("^LS\\d+[A-Z]$"))
+                .toList();
+        Map<String, Employee> employeesByLsNumber = validEmployees.stream()
                 .collect(Collectors.toMap(
                         emp -> emp.getLsNumber().substring(0, emp.getLsNumber().length() - 1),
                         emp -> emp, (a, b) -> a));
+        Map<String, Employee> employeesByNameAndFarm = validEmployees.stream()
+                .collect(Collectors.toMap(
+                        emp -> normalizeName(emp.getFullName() + emp.getFarm().getName()),
+                        emp -> emp, (a, b) -> a));
+        Map<String, List<Employee>> employeesByName = validEmployees.stream()
+                .collect(Collectors.groupingBy(emp -> normalizeName(emp.getFullName())));
 
         record PreparedEntry(Integer employeeId, Integer farmId, BigDecimal earned, BigDecimal paid) {}
         record PreparedRow(int year, int month, List<PreparedEntry> entries) {}
@@ -499,20 +510,18 @@ public class BulkImportService {
                 String paidStr = readCellAsString(row.getCell(ec.paidCol()));
                 if (earnedStr == null && paidStr == null) continue;
 
-                Employee employee = employeesByLsNumber.get(ec.lsNumber());
-                if (employee == null) {
-                    issues.add("Unknown LS number '" + ec.lsNumber() + "'");
-                    continue;
-                }
+                Employee employee = resolveEmployeeColumn(
+                        ec.headerKey(), employeesByLsNumber, employeesByNameAndFarm, employeesByName, issues);
+                if (employee == null) continue;
 
                 BigDecimal earned = null, paid = null;
                 if (earnedStr != null) {
                     earned = parseNonNegativeDecimal(earnedStr);
-                    if (earned == null) issues.add("Invalid Earned amount '" + earnedStr + "' for " + ec.lsNumber());
+                    if (earned == null) issues.add("Invalid Earned amount '" + earnedStr + "' for " + ec.headerKey());
                 }
                 if (paidStr != null) {
                     paid = parseNonNegativeDecimal(paidStr);
-                    if (paid == null) issues.add("Invalid Paid amount '" + paidStr + "' for " + ec.lsNumber());
+                    if (paid == null) issues.add("Invalid Paid amount '" + paidStr + "' for " + ec.headerKey());
                 }
                 if ((earnedStr != null && earned == null) || (paidStr != null && paid == null)) continue;
 
@@ -544,6 +553,43 @@ public class BulkImportService {
             imported++;
         }
         return new ImportResult(true, dataRowCount, imported, List.of());
+    }
+
+    /**
+     * Resolves one Employee pay import column header to an Employee: bare LS numbers (e.g. "LS2001")
+     * for backward compatibility, or a full name — disambiguated as "Name (Farm)" when that name
+     * exists on more than one farm, matching {@link ImportTemplateService#buildEmployeePayTemplate}'s
+     * header generation. Appends to {@code issues} and returns null on any resolution failure.
+     */
+    private Employee resolveEmployeeColumn(String headerKey, Map<String, Employee> employeesByLsNumber,
+                                            Map<String, Employee> employeesByNameAndFarm,
+                                            Map<String, List<Employee>> employeesByName, List<String> issues) {
+        String trimmed = headerKey.trim();
+        if (trimmed.toUpperCase().matches("^LS\\d+$")) {
+            Employee employee = employeesByLsNumber.get(trimmed.toUpperCase());
+            if (employee == null) issues.add("Unknown LS number '" + trimmed + "'");
+            return employee;
+        }
+
+        String key = normalizeName(trimmed);
+        Employee byNameAndFarm = employeesByNameAndFarm.get(key);
+        if (byNameAndFarm != null) return byNameAndFarm;
+
+        List<Employee> matches = employeesByName.getOrDefault(key, List.of());
+        if (matches.isEmpty()) {
+            issues.add("Unknown employee '" + trimmed + "'");
+            return null;
+        }
+        if (matches.size() > 1) {
+            issues.add("Employee name '" + trimmed + "' matches employees on multiple farms — specify the farm, e.g. '"
+                    + trimmed + " (FarmName)'");
+            return null;
+        }
+        return matches.get(0);
+    }
+
+    private static String normalizeName(String s) {
+        return s == null ? "" : s.toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 
     private void upsertPayrollEntry(Integer farmId, int year, int month, Integer employeeId,
