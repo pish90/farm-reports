@@ -6,6 +6,6 @@ public record ImportResult(
         boolean success,
         int totalRows,
         int importedCount,
-        int skippedCount,
+        int updatedCount,
         List<ImportRowError> errors
 ) {}

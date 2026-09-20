@@ -108,6 +108,11 @@ public class BulkImportService {
             return doImportLivestock(checkedSheet(workbook), year, userId);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error closing XLSX file");
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Could not read this file — check it matches the downloaded template's layout. Detail: " + e.getMessage());
         }
     }
 
@@ -259,6 +264,11 @@ public class BulkImportService {
             return doImportMilk(checkedSheet(workbook), year, userId);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error closing XLSX file");
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Could not read this file — check it matches the downloaded template's layout. Detail: " + e.getMessage());
         }
     }
 
@@ -407,6 +417,12 @@ public class BulkImportService {
             return doImportEmployeePay(checkedSheet(workbook), startYear, startMonth, paidByName);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error closing XLSX file");
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Could not read this file — check it matches the downloaded template's layout "
+                            + "(two header rows, Month in column A). Detail: " + e.getMessage());
         }
     }
 
@@ -642,16 +658,17 @@ public class BulkImportService {
 
     /**
      * Imports historical expense records spanning many farms/months in one file, one row per
-     * expense. Unlike the livestock/milk grid importers, expense rows are additive: each valid
-     * row becomes a new {@link Expense} row appended to whatever that farm/month's report
-     * already has — nothing already recorded is deleted or overwritten.
+     * expense. New (farm, ID) rows are appended to whatever that farm/month's report already
+     * has; nothing else on that report is touched.
      *
      * The "ID" column is the client's own receipt/voucher number, stored as {@code receiptNo}
-     * and used to keep re-imports idempotent: a row whose (farm, ID) already exists in the DB is
-     * silently skipped (counted in {@link ImportResult#skippedCount}, not an error) rather than
-     * blocking the whole batch, so re-uploading a file that mixes old and new rows only adds
-     * what's new. A row repeating an earlier row within the same file is still a row-level error,
-     * since it's ambiguous which of the two to keep.
+     * and doubles as the amend key: a row whose (farm, ID) already exists in the DB overwrites
+     * that expense's fields in place (counted in {@link ImportResult#updatedCount}) instead of
+     * being rejected as a duplicate — so re-uploading the template with corrected figures is how
+     * the client amends previously-imported expenses, the same file, at their own pace, without
+     * having to open every report individually. If the amended date moves the expense into a
+     * different month, it's moved to that month's report. A row repeating an earlier row within
+     * the same file is still a row-level error, since it's ambiguous which of the two to keep.
      */
     @Transactional
     public ImportResult importExpensesFromCsv(MultipartFile file, Integer userId) {
@@ -759,8 +776,8 @@ public class BulkImportService {
         }
     }
 
-    private record PreparedExpense(Integer farmId, int year, int month, LocalDate date, String receiptNo,
-                                    String supplier, String description, ExpenseCategory category,
+    private record PreparedExpense(Integer existingExpenseId, Integer farmId, int year, int month, LocalDate date,
+                                    String receiptNo, String supplier, String description, ExpenseCategory category,
                                     BigDecimal amount) {}
 
     private ImportResult runExpenseImport(List<Map<String, String>> rows, Integer userId) {
@@ -774,7 +791,7 @@ public class BulkImportService {
         List<ImportRowError> errors = new ArrayList<>();
         Set<String> seenInFile = new HashSet<>();
         int rowNum = 1;
-        int skipped = 0;
+        int updated = 0;
 
         for (Map<String, String> fields : rows) {
             rowNum++;
@@ -830,22 +847,15 @@ public class BulkImportService {
             String summary = (farmName != null ? farmName : "?") + " / " + (dateStr != null ? dateStr : "?")
                     + " / " + (receiptNo != null ? receiptNo : "?");
 
-            boolean alreadyImported = false;
+            Integer existingExpenseId = null;
             if (farm != null && receiptNo != null) {
                 String dedupeKey = farm.getId() + "|" + receiptNo.trim().toLowerCase();
                 if (!seenInFile.add(dedupeKey)) {
                     issues.add("Duplicate ID in file: '" + receiptNo + "' on " + farm.getName() + " appears more than once");
-                } else if (expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(farm.getId(), receiptNo.trim())) {
-                    alreadyImported = true;
+                } else {
+                    existingExpenseId = expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(farm.getId(), receiptNo.trim())
+                            .map(Expense::getId).orElse(null);
                 }
-            }
-
-            // A row matching an expense already in the DB is skipped rather than rejected, so
-            // re-uploading a file that mixes previously-imported rows with new ones only adds
-            // what's new instead of failing the whole batch — see class-level note on receiptNo.
-            if (alreadyImported) {
-                skipped++;
-                continue;
             }
 
             if (!issues.isEmpty()) {
@@ -853,25 +863,41 @@ public class BulkImportService {
                 continue;
             }
 
-            prepared.add(new PreparedExpense(farm.getId(), date.getYear(), date.getMonthValue(), date,
-                    receiptNo.trim(), supplier, description, category, amount));
+            prepared.add(new PreparedExpense(existingExpenseId, farm.getId(), date.getYear(), date.getMonthValue(),
+                    date, receiptNo.trim(), supplier, description, category, amount));
         }
 
         if (!errors.isEmpty()) {
-            return new ImportResult(false, rows.size(), 0, skipped, errors);
+            return new ImportResult(false, rows.size(), 0, 0, errors);
         }
 
         Map<Integer, Integer> nextEntryNoByReportId = new LinkedHashMap<>();
         int imported = 0;
         for (PreparedExpense pe : prepared) {
             ReportDto report = reportService.createOrGetReport(pe.farmId(), pe.year(), pe.month(), userId);
-            int entryNo = nextEntryNoByReportId.computeIfAbsent(report.id(),
-                    id -> expenseRepo.findMaxEntryNoByReportId(id) + 1);
-            nextEntryNoByReportId.put(report.id(), entryNo + 1);
 
-            Expense exp = new Expense();
-            exp.setReport(reportRepo.getReferenceById(report.id()));
-            exp.setEntryNo(entryNo);
+            Expense exp;
+            if (pe.existingExpenseId() != null) {
+                exp = expenseRepo.getReferenceById(pe.existingExpenseId());
+                // Amending the date into a different month moves the row to that month's report;
+                // otherwise it keeps its existing entryNo instead of drawing a new one.
+                if (!exp.getReport().getId().equals(report.id())) {
+                    exp.setReport(reportRepo.getReferenceById(report.id()));
+                    int entryNo = nextEntryNoByReportId.computeIfAbsent(report.id(),
+                            id -> expenseRepo.findMaxEntryNoByReportId(id) + 1);
+                    nextEntryNoByReportId.put(report.id(), entryNo + 1);
+                    exp.setEntryNo(entryNo);
+                }
+                updated++;
+            } else {
+                exp = new Expense();
+                exp.setReport(reportRepo.getReferenceById(report.id()));
+                int entryNo = nextEntryNoByReportId.computeIfAbsent(report.id(),
+                        id -> expenseRepo.findMaxEntryNoByReportId(id) + 1);
+                nextEntryNoByReportId.put(report.id(), entryNo + 1);
+                exp.setEntryNo(entryNo);
+                imported++;
+            }
             exp.setDate(pe.date());
             exp.setSupplierContractor(pe.supplier());
             exp.setReceiptNo(pe.receiptNo());
@@ -879,9 +905,8 @@ public class BulkImportService {
             exp.setDescription(pe.description());
             exp.setCategory(pe.category());
             expenseRepo.save(exp);
-            imported++;
         }
-        return new ImportResult(true, rows.size(), imported, skipped, List.of());
+        return new ImportResult(true, rows.size(), imported, updated, List.of());
     }
 
     // ── Shared helpers ───────────────────────────────────────────────────────

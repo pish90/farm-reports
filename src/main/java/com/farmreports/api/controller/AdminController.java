@@ -257,6 +257,21 @@ public class AdminController {
         return ApiResponse.ok(adminService.listExpenses(effectiveFarmId, year, month, categoryId, page, size));
     }
 
+    @PutMapping("/expenses/{id}")
+    public ApiResponse<ExpenseListItemDto> updateExpense(
+            @PathVariable Integer id,
+            @Valid @RequestBody ExpenseUpdateRequest request,
+            Authentication auth) {
+        requireAdmin(auth);
+        ExpenseListItemDto updated = adminService.updateExpense(id, request);
+        auditService.log(AuditAction.EXPENSE_UPDATED, auth, updated.farmId(), updated.farmName(),
+                "Expense", String.valueOf(id),
+                "Expense updated: " + (updated.description() != null ? updated.description() : "—")
+                        + " (" + updated.cost() + ", " + updated.farmName() + " "
+                        + updated.year() + "-" + String.format("%02d", updated.month()) + ")");
+        return ApiResponse.ok(updated);
+    }
+
     @DeleteMapping("/expenses/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteExpense(@PathVariable Integer id, Authentication auth) {

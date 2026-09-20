@@ -9,6 +9,7 @@ import com.farmreports.api.entity.ExpenseCategory;
 import com.farmreports.api.entity.Farm;
 import com.farmreports.api.entity.MonthlyReport;
 import com.farmreports.api.repository.EmployeeRepository;
+import com.farmreports.api.repository.ExpenseCategoryRepository;
 import com.farmreports.api.repository.ExpenseRepository;
 import com.farmreports.api.repository.FarmRepository;
 import com.farmreports.api.repository.LivestockReturnRepository;
@@ -52,13 +53,15 @@ class AdminServiceTest {
     @Mock EmployeeRepository employeeRepository;
     @Mock UserRepository userRepository;
     @Mock PasswordEncoder passwordEncoder;
+    @Mock ExpenseCategoryRepository expenseCategoryRepository;
 
     AdminService adminService;
 
     @Test
     void listExpenses_mapsFarmAndCategoryOntoFlatRow() {
         adminService = new AdminService(farmRepository, reportRepository, milkRepository, expenseRepository,
-                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder);
+                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder,
+                expenseCategoryRepository);
 
         Farm matunda = new Farm();
         matunda.setId(1);
@@ -107,7 +110,8 @@ class AdminServiceTest {
     @Test
     void listExpenses_noCategory_categoryNameIsNull() {
         adminService = new AdminService(farmRepository, reportRepository, milkRepository, expenseRepository,
-                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder);
+                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder,
+                expenseCategoryRepository);
 
         Farm lesA = new Farm();
         lesA.setId(2);
@@ -134,6 +138,52 @@ class AdminServiceTest {
         assertThat(result.content().get(0).categoryName()).isNull();
     }
 
+    @Test
+    void updateExpense_appliesNewFieldsAndSaves() {
+        adminService = new AdminService(farmRepository, reportRepository, milkRepository, expenseRepository,
+                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder,
+                expenseCategoryRepository);
+
+        Farm matunda = new Farm();
+        matunda.setId(1);
+        matunda.setName("Matunda");
+
+        MonthlyReport report = new MonthlyReport();
+        report.setId(55);
+        report.setFarm(matunda);
+        report.setYear(2026);
+        report.setMonth(1);
+
+        ExpenseCategory fuel = new ExpenseCategory();
+        fuel.setId(9);
+        fuel.setAccountName("Fuel");
+
+        Expense expense = new Expense();
+        expense.setId(200);
+        expense.setReport(report);
+        expense.setEntryNo(1);
+        expense.setDate(LocalDate.of(2026, 1, 15));
+        expense.setSupplierContractor("Old Supplier");
+        expense.setCost(new BigDecimal("100.00"));
+
+        when(expenseRepository.findById(200)).thenReturn(Optional.of(expense));
+        when(expenseCategoryRepository.getReferenceById(9)).thenReturn(fuel);
+        when(expenseRepository.save(any(Expense.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        var request = new com.farmreports.api.dto.ExpenseUpdateRequest(
+                LocalDate.of(2026, 1, 20), "New Supplier", "INV-9", new BigDecimal("250.50"), "Updated desc", 9);
+
+        ExpenseListItemDto result = adminService.updateExpense(200, request);
+
+        assertThat(result.date()).isEqualTo(LocalDate.of(2026, 1, 20));
+        assertThat(result.supplierContractor()).isEqualTo("New Supplier");
+        assertThat(result.receiptNo()).isEqualTo("INV-9");
+        assertThat(result.cost()).isEqualByComparingTo("250.50");
+        assertThat(result.description()).isEqualTo("Updated desc");
+        assertThat(result.categoryName()).isEqualTo("Fuel");
+        assertThat(expense.getSupplierContractor()).isEqualTo("New Supplier");
+    }
+
     // ── Farm isolation regression: a MANAGER's effectiveFarmId must confine these to one farm ──
 
     private static Farm farm(int id, String name) {
@@ -146,7 +196,8 @@ class AdminServiceTest {
     @Test
     void getAllFarmSummaries_withFarmId_returnsOnlyThatFarm_notEveryFarm() {
         adminService = new AdminService(farmRepository, reportRepository, milkRepository, expenseRepository,
-                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder);
+                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder,
+                expenseCategoryRepository);
 
         Farm matunda = farm(1, "Matunda");
         when(farmRepository.findById(1)).thenReturn(Optional.of(matunda));
@@ -165,7 +216,8 @@ class AdminServiceTest {
     @Test
     void getAllFarmSummaries_nullFarmId_returnsEveryFarm() {
         adminService = new AdminService(farmRepository, reportRepository, milkRepository, expenseRepository,
-                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder);
+                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder,
+                expenseCategoryRepository);
 
         when(farmRepository.findAll()).thenReturn(List.of(farm(1, "Matunda"), farm(2, "Les A")));
         lenient().when(reportRepository.findFirstByFarm_IdOrderByCreatedAtDesc(anyInt()))
@@ -181,7 +233,8 @@ class AdminServiceTest {
     @Test
     void getFarmLiveStatus_withFarmId_returnsOnlyThatFarm_notEveryFarm() {
         adminService = new AdminService(farmRepository, reportRepository, milkRepository, expenseRepository,
-                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder);
+                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder,
+                expenseCategoryRepository);
 
         Farm matunda = farm(1, "Matunda");
         when(farmRepository.findById(1)).thenReturn(Optional.of(matunda));

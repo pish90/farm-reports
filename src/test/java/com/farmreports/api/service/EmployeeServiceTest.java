@@ -172,7 +172,7 @@ class EmployeeServiceTest {
     }
 
     @Test
-    void importEmployeesFromCsv_matchesExistingEmployeeWithFieldsAlreadySet_neverOverwritesThem() {
+    void importEmployeesFromCsv_matchesExistingEmployeeWithFieldsAlreadySet_amendsThemFromTheRow() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda, lesA, kenlet));
 
         Employee existing = new Employee();
@@ -196,6 +196,39 @@ class EmployeeServiceTest {
         assertThat(result.success()).isTrue();
         assertThat(result.mergedCount()).isEqualTo(1);
 
+        // A non-blank cell amends the field even though the employee already had a different
+        // value -- re-uploading the roster is how the client corrects/updates details, not just
+        // fills blanks.
+        ArgumentCaptor<Employee> saved = ArgumentCaptor.forClass(Employee.class);
+        verify(employeeRepo).save(saved.capture());
+        assertThat(saved.getValue().getPhone()).isEqualTo("0712345678");
+        assertThat(saved.getValue().getJobTitle()).isEqualTo("Herdsman");
+    }
+
+    @Test
+    void importEmployeesFromCsv_blankCellInRow_leavesExistingFieldUntouched() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda, lesA, kenlet));
+
+        Employee existing = new Employee();
+        existing.setId(9);
+        existing.setFarm(matunda);
+        existing.setFirstName("Jane");
+        existing.setLastName("Doe");
+        existing.setSalaried(true);
+        existing.setPhone("0700000000");
+        existing.setJobTitle("Original Title");
+        when(employeeRepo.findAll()).thenReturn(List.of(existing));
+        when(employeeRepo.save(any(Employee.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        // phone/jobTitle left blank in the file -- amending one field must not erase another.
+        String csv = "farmName,firstName,lastName,phone,employmentType,jobTitle,startDate,defaultDailyRate\n"
+                + "Matunda,jane,doe,,SALARIED,,2024-01-15,\n";
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "employees.csv", "text/csv", csv.getBytes(StandardCharsets.UTF_8));
+
+        EmployeeCsvImportResult result = employeeService.importEmployeesFromCsv(file);
+
+        assertThat(result.success()).isTrue();
         ArgumentCaptor<Employee> saved = ArgumentCaptor.forClass(Employee.class);
         verify(employeeRepo).save(saved.capture());
         assertThat(saved.getValue().getPhone()).isEqualTo("0700000000");

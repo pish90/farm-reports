@@ -1,6 +1,7 @@
 package com.farmreports.api.service;
 
 import com.farmreports.api.dto.ExpenseListItemDto;
+import com.farmreports.api.dto.ExpenseUpdateRequest;
 import com.farmreports.api.dto.FarmLiveStatusDto;
 import com.farmreports.api.dto.FarmSummaryDto;
 import com.farmreports.api.dto.PageDto;
@@ -38,6 +39,7 @@ public class AdminService {
     private final EmployeeRepository employeeRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ExpenseCategoryRepository expenseCategoryRepository;
 
     /** farmId null → every farm (ADMIN/OPERATIONS_MANAGER); non-null → that farm only (MANAGER,
      *  confined to their own farm by the caller). */
@@ -161,6 +163,42 @@ public class AdminService {
                 ))
                 .toList();
         return new PageDto<>(content, result.getTotalElements(), result.getTotalPages(), page, size);
+    }
+
+    /** Edits a single expense in place (ADMIN only, standalone Expenses page) — distinct from
+     *  the whole-report upsert used by the report-detail Expenses tab. */
+    @Transactional
+    public ExpenseListItemDto updateExpense(Integer id, ExpenseUpdateRequest request) {
+        Expense expense = expenseRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Expense not found"));
+
+        expense.setDate(request.date());
+        expense.setSupplierContractor(blankToNull(request.supplierContractor()));
+        expense.setReceiptNo(blankToNull(request.receiptNo()));
+        expense.setCost(request.cost());
+        expense.setDescription(blankToNull(request.description()));
+        expense.setCategory(request.categoryId() != null
+                ? expenseCategoryRepository.getReferenceById(request.categoryId()) : null);
+
+        Expense saved = expenseRepository.save(expense);
+        return new ExpenseListItemDto(
+                saved.getId(),
+                saved.getReport().getId(),
+                saved.getReport().getFarm().getId(),
+                saved.getReport().getFarm().getName(),
+                saved.getReport().getYear(),
+                saved.getReport().getMonth(),
+                saved.getDate(),
+                saved.getReceiptNo(),
+                saved.getSupplierContractor(),
+                saved.getDescription(),
+                saved.getCategory() != null ? saved.getCategory().getAccountName() : null,
+                saved.getCost()
+        );
+    }
+
+    private static String blankToNull(String s) {
+        return s != null && !s.isBlank() ? s.trim() : null;
     }
 
     /** Deletes a single expense (ADMIN only, standalone Expenses page). Returns the

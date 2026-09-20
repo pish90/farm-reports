@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 
 public interface ExpenseRepository extends JpaRepository<Expense, Integer>, JpaSpecificationExecutor<Expense> {
 
@@ -20,7 +21,7 @@ public interface ExpenseRepository extends JpaRepository<Expense, Integer>, JpaS
 
     long countByReportId(Integer reportId);
 
-    boolean existsByReport_Farm_IdAndReceiptNoIgnoreCase(Integer farmId, String receiptNo);
+    Optional<Expense> findByReport_Farm_IdAndReceiptNoIgnoreCase(Integer farmId, String receiptNo);
 
     @Query("SELECT COALESCE(MAX(e.entryNo), 0) FROM Expense e WHERE e.report.id = :reportId")
     int findMaxEntryNoByReportId(@Param("reportId") Integer reportId);

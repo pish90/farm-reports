@@ -1,0 +1,18 @@
+package com.farmreports.api.dto;
+
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.NotNull;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
+/** Edits a single expense from the standalone Expenses page — distinct from
+ *  {@link ExpenseEntryRequest}, which replaces a whole report's expense list at once. */
+public record ExpenseUpdateRequest(
+        @NotNull LocalDate date,
+        String supplierContractor,
+        String receiptNo,
+        @NotNull @DecimalMin("0.00") BigDecimal cost,
+        String description,
+        Integer categoryId
+) {}

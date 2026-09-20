@@ -282,10 +282,12 @@ public class EmployeeService {
 
     /**
      * Shared validate-all-then-apply-all logic used by both the CSV and XLSX importers. A row
-     * whose (farm, first name, last name) matches an existing employee — or an earlier row in
-     * the same file — but requests an employment type they don't already have merges into that
-     * employee (OR's the flag in) instead of erroring; only a row that adds nothing new is a
-     * real duplicate error.
+     * whose (farm, first name, last name) matches an existing employee amends that employee in
+     * place — any non-blank cell in the row overwrites that field (an OR onto the employment-type
+     * flags rather than a replace, so a row can add a type without dropping the other) — instead
+     * of erroring, which is how the client re-uploads the roster to correct/update details. Only
+     * a row for a brand-new hire that repeats an earlier row in the same file with nothing new to
+     * add is a real duplicate error.
      */
     private EmployeeCsvImportResult runImport(List<Map<String, String>> rows) {
         Map<String, Farm> farmsByName = farmRepo.findAll().stream()
@@ -427,15 +429,17 @@ public class EmployeeService {
                 Employee emp = pending.existing;
                 emp.setSalaried(emp.isSalaried() || pending.salaried);
                 emp.setCasual(emp.isCasual() || pending.casual);
-                // Backfill only — never overwrite a field that already has a value, so a
-                // repair upload can't clobber data that's already correct.
-                if (isBlank(emp.getPhone()) && pending.phone != null) emp.setPhone(pending.phone);
-                if (isBlank(emp.getJobTitle()) && pending.jobTitle != null) emp.setJobTitle(pending.jobTitle);
-                if (emp.getStartDate() == null && pending.startDate != null) emp.setStartDate(parseDate(pending.startDate));
-                if (emp.getDateOfBirth() == null && pending.dateOfBirth != null) emp.setDateOfBirth(parseDate(pending.dateOfBirth));
-                if (isBlank(emp.getNationalId()) && pending.nationalId != null) emp.setNationalId(pending.nationalId);
-                if (isBlank(emp.getGender()) && pending.gender != null) emp.setGender(pending.gender);
-                if (emp.getDefaultDailyRate() == null && pending.defaultDailyRate != null) emp.setDefaultDailyRate(pending.defaultDailyRate);
+                // A non-blank cell in the file amends that field, even if the employee already
+                // had a different value — this is how the client re-uploads the roster to
+                // correct/update details, not just to fill in blanks. A blank cell always leaves
+                // the existing value alone, so amending one field never erases another.
+                if (pending.phone != null) emp.setPhone(pending.phone);
+                if (pending.jobTitle != null) emp.setJobTitle(pending.jobTitle);
+                if (pending.startDate != null) emp.setStartDate(parseDate(pending.startDate));
+                if (pending.dateOfBirth != null) emp.setDateOfBirth(parseDate(pending.dateOfBirth));
+                if (pending.nationalId != null) emp.setNationalId(pending.nationalId);
+                if (pending.gender != null) emp.setGender(pending.gender);
+                if (pending.defaultDailyRate != null) emp.setDefaultDailyRate(pending.defaultDailyRate);
                 employeeRepo.save(emp);
                 merged++;
             }
@@ -465,10 +469,6 @@ public class EmployeeService {
             this.firstName = firstName;
             this.lastName = lastName;
         }
-    }
-
-    private static boolean isBlank(String s) {
-        return s == null || s.isBlank();
     }
 
     private static String normalizeHeader(String s) {

@@ -46,6 +46,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -481,7 +482,7 @@ class BulkImportServiceTest {
     void importExpensesFromCsv_validRows_appendsToExistingReportWithIncrementingEntryNo() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of(category(1, "4000", "Fuel")));
-        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(Optional.empty());
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(3);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
                 new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
@@ -510,10 +511,23 @@ class BulkImportServiceTest {
     }
 
     @Test
-    void importExpensesFromCsv_duplicateIdAlreadyInDb_skipsRowWithoutFailingBatch() {
+    void importExpensesFromCsv_duplicateIdAlreadyInDb_updatesExistingExpenseInPlace() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of());
-        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001")).thenReturn(true);
+
+        MonthlyReport report = new MonthlyReport();
+        report.setId(55);
+        Expense existing = new Expense();
+        existing.setId(300);
+        existing.setReport(report);
+        existing.setEntryNo(2);
+        existing.setSupplierContractor("Old Supplier");
+        existing.setCost(new BigDecimal("100.00"));
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001"))
+                .thenReturn(Optional.of(existing));
+        when(expenseRepo.getReferenceById(300)).thenReturn(existing);
+        when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
+                new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
 
         String csv = "farm,date,ID,supplier,product/service,category,amount\n"
                 + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,,5400.00\n";
@@ -523,17 +537,32 @@ class BulkImportServiceTest {
         assertThat(result.success()).isTrue();
         assertThat(result.errors()).isEmpty();
         assertThat(result.importedCount()).isEqualTo(0);
-        assertThat(result.skippedCount()).isEqualTo(1);
-        verify(expenseRepo, never()).save(any());
+        assertThat(result.updatedCount()).isEqualTo(1);
+        ArgumentCaptor<Expense> captor = ArgumentCaptor.forClass(Expense.class);
+        verify(expenseRepo).save(captor.capture());
+        assertThat(captor.getValue().getId()).isEqualTo(300);
+        assertThat(captor.getValue().getSupplierContractor()).isEqualTo("ABC Traders");
+        assertThat(captor.getValue().getCost()).isEqualByComparingTo("5400.00");
+        assertThat(captor.getValue().getEntryNo()).isEqualTo(2); // unchanged -- stayed on the same report
     }
 
     @Test
-    void importExpensesFromCsv_mixOfNewAndAlreadyImportedRows_importsOnlyNewOnes() {
+    void importExpensesFromCsv_mixOfNewAndAlreadyOnFileRows_importsNewAndUpdatesExisting() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of());
-        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001")).thenReturn(true);
-        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1002")).thenReturn(false);
-        when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
+
+        MonthlyReport report = new MonthlyReport();
+        report.setId(55);
+        Expense existing = new Expense();
+        existing.setId(300);
+        existing.setReport(report);
+        existing.setEntryNo(2);
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001"))
+                .thenReturn(Optional.of(existing));
+        when(expenseRepo.getReferenceById(300)).thenReturn(existing);
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1002"))
+                .thenReturn(Optional.empty());
+        when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(2);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
                 new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
 
@@ -545,17 +574,18 @@ class BulkImportServiceTest {
 
         assertThat(result.success()).isTrue();
         assertThat(result.importedCount()).isEqualTo(1);
-        assertThat(result.skippedCount()).isEqualTo(1);
+        assertThat(result.updatedCount()).isEqualTo(1);
         ArgumentCaptor<Expense> captor = ArgumentCaptor.forClass(Expense.class);
-        verify(expenseRepo).save(captor.capture());
-        assertThat(captor.getValue().getReceiptNo()).isEqualTo("INV-1002");
+        verify(expenseRepo, times(2)).save(captor.capture());
+        assertThat(captor.getAllValues()).extracting(Expense::getReceiptNo)
+                .containsExactlyInAnyOrder("INV-1001", "INV-1002");
     }
 
     @Test
     void importExpensesFromCsv_duplicateIdWithinFile_rejectsSecondOccurrence() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of());
-        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(Optional.empty());
 
         String csv = "farm,date,ID,supplier,product/service,category,amount\n"
                 + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,,5400.00\n"
@@ -574,7 +604,7 @@ class BulkImportServiceTest {
     void importExpensesFromCsv_unrecognizedCategory_leftBlankNotAnError() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of(category(1, "4000", "Fuel")));
-        when(expenseRepo.existsByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(false);
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(Optional.empty());
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
                 new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
