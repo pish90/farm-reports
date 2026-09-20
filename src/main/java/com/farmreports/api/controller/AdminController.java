@@ -45,10 +45,15 @@ public class AdminController {
     // ── Dashboard / overview ───────────────────────────────────────────────────
 
     @GetMapping("/farms")
-    public ApiResponse<List<FarmSummaryDto>> getFarmSummaries(Authentication auth) {
+    public ApiResponse<List<FarmSummaryDto>> getFarmSummaries(
+            @RequestParam(required = false) Integer year,
+            @RequestParam(required = false) Integer month,
+            Authentication auth) {
         requireDashboardRole(auth);
+        int y = year  != null ? year  : java.time.LocalDate.now().getYear();
+        int m = month != null ? month : java.time.LocalDate.now().getMonthValue();
         Integer effectiveFarmId = (isAdmin(auth) || isOpsManager(auth)) ? null : ClaimsHelper.getFarmId(auth);
-        return ApiResponse.ok(adminService.getAllFarmSummaries(effectiveFarmId));
+        return ApiResponse.ok(adminService.getAllFarmSummaries(effectiveFarmId, y, m));
     }
 
     @GetMapping("/live-status")

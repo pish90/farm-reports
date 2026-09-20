@@ -20,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -47,10 +46,7 @@ public class AdminService {
         return farmId != null ? farmRepository.findById(farmId).map(List::of).orElse(List.of()) : farmRepository.findAll();
     }
 
-    public List<FarmSummaryDto> getAllFarmSummaries(Integer farmId) {
-        int year = LocalDate.now().getYear();
-        int month = LocalDate.now().getMonthValue();
-
+    public List<FarmSummaryDto> getAllFarmSummaries(Integer farmId, int year, int month) {
         return farmsInScope(farmId).stream().map(farm -> {
             LocalDateTime lastReportAt = reportRepository
                 .findFirstByFarm_IdOrderByCreatedAtDesc(farm.getId())

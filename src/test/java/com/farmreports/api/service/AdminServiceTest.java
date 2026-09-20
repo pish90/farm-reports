@@ -205,7 +205,7 @@ class AdminServiceTest {
                 .thenReturn(Optional.empty());
         lenient().when(reportRepository.countByFarm_IdAndYear(anyInt(), anyInt())).thenReturn(0L);
 
-        List<FarmSummaryDto> result = adminService.getAllFarmSummaries(1);
+        List<FarmSummaryDto> result = adminService.getAllFarmSummaries(1, 2026, 1);
 
         assertThat(result).hasSize(1);
         assertThat(result.get(0).farmId()).isEqualTo(1);
@@ -224,10 +224,33 @@ class AdminServiceTest {
                 .thenReturn(Optional.empty());
         lenient().when(reportRepository.countByFarm_IdAndYear(anyInt(), anyInt())).thenReturn(0L);
 
-        List<FarmSummaryDto> result = adminService.getAllFarmSummaries(null);
+        List<FarmSummaryDto> result = adminService.getAllFarmSummaries(null, 2026, 1);
 
         assertThat(result).hasSize(2);
         verify(farmRepository, never()).findById(any());
+    }
+
+    @Test
+    void getAllFarmSummaries_usesRequestedPeriod_notTodaysCalendarMonth() {
+        adminService = new AdminService(farmRepository, reportRepository, milkRepository, expenseRepository,
+                payrollEntryRepository, livestockReturnRepository, employeeRepository, userRepository, passwordEncoder,
+                expenseCategoryRepository);
+
+        Farm matunda = farm(1, "Matunda");
+        when(farmRepository.findById(1)).thenReturn(Optional.of(matunda));
+        lenient().when(reportRepository.findFirstByFarm_IdOrderByCreatedAtDesc(anyInt()))
+                .thenReturn(Optional.empty());
+        lenient().when(reportRepository.countByFarm_IdAndYear(1, 2026)).thenReturn(4L);
+        when(milkRepository.sumLitresByFarmAndYearAndMonth(1, 2026, 7)).thenReturn(new BigDecimal("620.0"));
+        when(expenseRepository.sumCostByFarmAndYearAndMonth(1, 2026, 7)).thenReturn(new BigDecimal("15000.00"));
+
+        // A past period (July), not today's real calendar month, is what the dashboard's
+        // month selector is actually showing -- the totals must follow it.
+        List<FarmSummaryDto> result = adminService.getAllFarmSummaries(1, 2026, 7);
+
+        assertThat(result.get(0).totalMilkThisMonth()).isEqualTo(620.0);
+        assertThat(result.get(0).totalExpensesThisMonth()).isEqualTo(15000.00);
+        assertThat(result.get(0).reportsThisYear()).isEqualTo(4L);
     }
 
     @Test
