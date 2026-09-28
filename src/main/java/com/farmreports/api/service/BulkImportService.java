@@ -5,6 +5,9 @@ import com.farmreports.api.dto.ImportRowError;
 import com.farmreports.api.dto.LivestockEntryRequest;
 import com.farmreports.api.dto.MilkEntryRequest;
 import com.farmreports.api.dto.ReportDto;
+import com.farmreports.api.entity.CasualLabourerPayment;
+import com.farmreports.api.entity.CasualWorkEntry;
+import com.farmreports.api.entity.CasualWorkSession;
 import com.farmreports.api.entity.Employee;
 import com.farmreports.api.entity.EmployeePayment;
 import com.farmreports.api.entity.Expense;
@@ -16,6 +19,9 @@ import com.farmreports.api.entity.LivestockType;
 import com.farmreports.api.entity.MilkProduction;
 import com.farmreports.api.entity.MonthlyReport;
 import com.farmreports.api.entity.PayrollEntry;
+import com.farmreports.api.repository.CasualLabourerPaymentRepository;
+import com.farmreports.api.repository.CasualWorkEntryRepository;
+import com.farmreports.api.repository.CasualWorkSessionRepository;
 import com.farmreports.api.repository.EmployeePaymentRepository;
 import com.farmreports.api.repository.EmployeeRepository;
 import com.farmreports.api.repository.ExpenseCategoryRepository;
@@ -79,6 +85,9 @@ public class BulkImportService {
     private final ReportService reportService;
     private final ExpenseRepository expenseRepo;
     private final ExpenseCategoryRepository expenseCategoryRepo;
+    private final CasualLabourerPaymentRepository casualPaymentRepo;
+    private final CasualWorkSessionRepository casualSessionRepo;
+    private final CasualWorkEntryRepository casualEntryRepo;
 
     private static final List<String> REQUIRED_EXPENSE_COLUMNS = List.of("farm", "date", "id", "amount");
 
@@ -405,10 +414,19 @@ public class BulkImportService {
      * subsequent row is assumed to be the next calendar month in sequence, cross-checked against
      * its own Month label.
      *
-     * "Earned" is written to payroll_entries.gross_salary and "Paid" to both
-     * payroll_entries.amount_paid (read by the Payroll tab) and a tagged employee_payments row
-     * (read by the Annual Ledger) — see PAY_IMPORT_TAG. Fields the sheet doesn't provide
-     * (salaryRate, daysWorked, loans, notes) are left untouched on existing payroll_entries rows.
+     * For a salaried employee (or one marked both salaried and casual — salaried wins so this
+     * matches prior behavior unchanged), "Earned" is written to payroll_entries.gross_salary and
+     * "Paid" to both payroll_entries.amount_paid (read by the Payroll tab) and a tagged
+     * employee_payments row (read by the Annual Ledger) — see PAY_IMPORT_TAG. Fields the sheet
+     * doesn't provide (salaryRate, daysWorked, loans, notes) are left untouched on existing
+     * payroll_entries rows.
+     *
+     * For a pure-casual employee (salaried = false, casual = true), there's no equivalent
+     * directly-settable "earned" field — the Annual Ledger always sums it from real work-session
+     * entries — so "Earned" instead goes into a synthetic, PAY_IMPORT_TAG-tagged
+     * {@code CasualWorkSession}/{@code CasualWorkEntry} (see {@link #upsertCasualEarned}), and
+     * "Paid" into a tagged {@code casual_labourer_payments} row (see
+     * {@link #replaceCasualTaggedPayment}), mirroring the salaried path.
      */
     @Transactional
     public ImportResult importEmployeePayFromXlsx(MultipartFile file, Integer startYear, Integer startMonth,
@@ -488,7 +506,7 @@ public class BulkImportService {
         Map<String, List<Employee>> employeesByName = validEmployees.stream()
                 .collect(Collectors.groupingBy(emp -> normalizeName(emp.getFullName())));
 
-        record PreparedEntry(Integer employeeId, Integer farmId, BigDecimal earned, BigDecimal paid) {}
+        record PreparedEntry(Integer employeeId, Integer farmId, boolean casual, BigDecimal earned, BigDecimal paid) {}
         record PreparedRow(int year, int month, List<PreparedEntry> entries) {}
         List<PreparedRow> prepared = new ArrayList<>();
         List<ImportRowError> errors = new ArrayList<>();
@@ -541,7 +559,11 @@ public class BulkImportService {
                 }
                 if ((earnedStr != null && earned == null) || (paidStr != null && paid == null)) continue;
 
-                entries.add(new PreparedEntry(employee.getId(), employee.getFarm().getId(), earned, paid));
+                // Salaried takes priority for an employee marked both (dual employment type):
+                // this preserves the existing payroll-entries path unchanged, and only routes
+                // pure-casual employees (salaried = false) to the casual ledger below.
+                boolean routeCasual = employee.isCasual() && !employee.isSalaried();
+                entries.add(new PreparedEntry(employee.getId(), employee.getFarm().getId(), routeCasual, earned, paid));
             }
 
             String summary = (monthStr != null ? monthStr : "?") + " " + expectedYear;
@@ -559,11 +581,21 @@ public class BulkImportService {
         int imported = 0;
         for (PreparedRow row : prepared) {
             for (PreparedEntry entry : row.entries()) {
-                upsertPayrollEntry(entry.farmId(), row.year(), row.month(), entry.employeeId(),
-                        entry.earned(), entry.paid());
-                if (entry.paid() != null) {
-                    replaceTaggedPayment(entry.employeeId(), entry.farmId(), row.year(), row.month(),
-                            entry.paid(), paidByName);
+                if (entry.casual()) {
+                    if (entry.earned() != null) {
+                        upsertCasualEarned(entry.farmId(), row.year(), row.month(), entry.employeeId(), entry.earned());
+                    }
+                    if (entry.paid() != null) {
+                        replaceCasualTaggedPayment(entry.employeeId(), entry.farmId(), row.year(), row.month(),
+                                entry.paid(), paidByName);
+                    }
+                } else {
+                    upsertPayrollEntry(entry.farmId(), row.year(), row.month(), entry.employeeId(),
+                            entry.earned(), entry.paid());
+                    if (entry.paid() != null) {
+                        replaceTaggedPayment(entry.employeeId(), entry.farmId(), row.year(), row.month(),
+                                entry.paid(), paidByName);
+                    }
                 }
             }
             imported++;
@@ -651,6 +683,67 @@ public class BulkImportService {
             payment.setNote(PAY_IMPORT_TAG);
             payment.setPaidBy(paidByName);
             paymentRepo.save(payment);
+        }
+    }
+
+    /**
+     * Casual "Earned" has no directly-settable field anywhere — the Annual Ledger always sums it
+     * from real {@link CasualWorkEntry} rows for the employee's {@link CasualWorkSession}s that
+     * month (see {@code CasualLabourerService.getLedger}). To backfill a historical monthly total
+     * without real session-level data, this finds-or-creates one shared session per (farm, month)
+     * tagged via its {@code activity} field with {@link #PAY_IMPORT_TAG}, dated the last day of
+     * that month, and gives the employee a single entry in it with {@code rateOverride} set to the
+     * imported amount — so the ledger's sum lands on exactly that figure. Re-importing the same
+     * (farm, month) updates that employee's entry in place rather than adding a duplicate.
+     */
+    private void upsertCasualEarned(Integer farmId, int year, int month, Integer employeeId, BigDecimal earned) {
+        LocalDate monthStart = LocalDate.of(year, month, 1);
+        LocalDate monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth());
+
+        CasualWorkSession session = casualSessionRepo
+                .findByFarmIdAndSessionDateAndActivity(farmId, monthEnd, PAY_IMPORT_TAG)
+                .orElseGet(() -> {
+                    CasualWorkSession fresh = new CasualWorkSession();
+                    fresh.setFarm(farmRepo.getReferenceById(farmId));
+                    fresh.setSessionDate(monthEnd);
+                    fresh.setActivity(PAY_IMPORT_TAG);
+                    fresh.setDefaultDailyRate(BigDecimal.ZERO);
+                    return casualSessionRepo.save(fresh);
+                });
+
+        CasualWorkEntry entry = session.getEntries().stream()
+                .filter(e -> e.getEmployee().getId().equals(employeeId))
+                .findFirst()
+                .orElseGet(() -> {
+                    CasualWorkEntry fresh = new CasualWorkEntry();
+                    fresh.setSession(session);
+                    fresh.setEmployee(employeeRepo.getReferenceById(employeeId));
+                    session.getEntries().add(fresh);
+                    return fresh;
+                });
+        entry.setRateOverride(earned);
+        casualEntryRepo.save(entry);
+    }
+
+    private void replaceCasualTaggedPayment(Integer employeeId, Integer farmId, int year, int month,
+                                             BigDecimal paid, String paidByName) {
+        LocalDate monthStart = LocalDate.of(year, month, 1);
+        LocalDate monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth());
+
+        List<CasualLabourerPayment> taggedExisting = casualPaymentRepo
+                .findByEmployeeIdAndFarmIdAndPaymentDateBetween(employeeId, farmId, monthStart, monthEnd)
+                .stream().filter(p -> PAY_IMPORT_TAG.equals(p.getNote())).toList();
+        if (!taggedExisting.isEmpty()) casualPaymentRepo.deleteAll(taggedExisting);
+
+        if (paid.signum() > 0) {
+            CasualLabourerPayment payment = new CasualLabourerPayment();
+            payment.setEmployee(employeeRepo.getReferenceById(employeeId));
+            payment.setFarm(farmRepo.getReferenceById(farmId));
+            payment.setPaymentDate(monthEnd);
+            payment.setAmount(paid);
+            payment.setNote(PAY_IMPORT_TAG);
+            payment.setPaidBy(paidByName);
+            casualPaymentRepo.save(payment);
         }
     }
 

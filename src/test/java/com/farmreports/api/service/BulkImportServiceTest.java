@@ -4,6 +4,9 @@ import com.farmreports.api.dto.ImportResult;
 import com.farmreports.api.dto.LivestockEntryRequest;
 import com.farmreports.api.dto.MilkEntryRequest;
 import com.farmreports.api.dto.ReportDto;
+import com.farmreports.api.entity.CasualLabourerPayment;
+import com.farmreports.api.entity.CasualWorkEntry;
+import com.farmreports.api.entity.CasualWorkSession;
 import com.farmreports.api.entity.Employee;
 import com.farmreports.api.entity.EmployeePayment;
 import com.farmreports.api.entity.Expense;
@@ -15,6 +18,9 @@ import com.farmreports.api.entity.LivestockType;
 import com.farmreports.api.entity.MilkProduction;
 import com.farmreports.api.entity.MonthlyReport;
 import com.farmreports.api.entity.PayrollEntry;
+import com.farmreports.api.repository.CasualLabourerPaymentRepository;
+import com.farmreports.api.repository.CasualWorkEntryRepository;
+import com.farmreports.api.repository.CasualWorkSessionRepository;
 import com.farmreports.api.repository.EmployeePaymentRepository;
 import com.farmreports.api.repository.EmployeeRepository;
 import com.farmreports.api.repository.ExpenseCategoryRepository;
@@ -62,6 +68,9 @@ class BulkImportServiceTest {
     @Mock ReportService reportService;
     @Mock ExpenseRepository expenseRepo;
     @Mock ExpenseCategoryRepository expenseCategoryRepo;
+    @Mock CasualLabourerPaymentRepository casualPaymentRepo;
+    @Mock CasualWorkSessionRepository casualSessionRepo;
+    @Mock CasualWorkEntryRepository casualEntryRepo;
 
     BulkImportService bulkImportService;
 
@@ -71,7 +80,7 @@ class BulkImportServiceTest {
     void setUp() {
         bulkImportService = new BulkImportService(
                 farmRepo, reportRepo, livestockTypeRepo, employeeRepo, payrollRepo, paymentRepo, reportService,
-                expenseRepo, expenseCategoryRepo);
+                expenseRepo, expenseCategoryRepo, casualPaymentRepo, casualSessionRepo, casualEntryRepo);
 
         matunda = new Farm();
         matunda.setId(1);
@@ -304,6 +313,60 @@ class BulkImportServiceTest {
         EmployeePayment payment = paymentCaptor.getValue();
         assertThat(payment.getEmployeeId()).isEqualTo(7);
         assertThat(payment.getAmount()).isEqualByComparingTo("20000");
+        assertThat(payment.getNote()).isEqualTo("Bulk import (Employee pay XLSX)");
+        assertThat(payment.getPaidBy()).isEqualTo("Peter Khayundi");
+    }
+
+    @Test
+    void importEmployeePay_casualEmployee_writesCasualWorkEntryAndTaggedPayment() throws IOException {
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sheet = wb.createSheet("Employee pay_import");
+        Row lsRow = sheet.createRow(0);
+        lsRow.createCell(1).setCellValue("LS2002");
+        lsRow.createCell(2).setCellValue("LS2002");
+        Row subRow = sheet.createRow(1);
+        subRow.createCell(1).setCellValue("Earned");
+        subRow.createCell(2).setCellValue("Paid");
+        Row data = sheet.createRow(2);
+        data.createCell(0).setCellValue("Jan");
+        data.createCell(1).setCellValue(9000);
+        data.createCell(2).setCellValue(4000);
+        MockMultipartFile file = toXlsx(wb, "pay.xlsx");
+
+        Employee samuel = employee(8, "LS2002M", matunda);
+        samuel.setCasual(true); // salaried left false — pure casual, should route off the payroll path
+        when(employeeRepo.findAll()).thenReturn(List.of(samuel));
+        when(employeeRepo.getReferenceById(8)).thenReturn(samuel);
+        when(farmRepo.getReferenceById(1)).thenReturn(matunda);
+        when(casualSessionRepo.findByFarmIdAndSessionDateAndActivity(eq(1), any(), any()))
+                .thenReturn(Optional.empty());
+        when(casualSessionRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(casualPaymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(8), eq(1), any(), any()))
+                .thenReturn(List.of());
+
+        ImportResult result = bulkImportService.importEmployeePayFromXlsx(file, 2026, 1, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.importedCount()).isEqualTo(1);
+
+        // Salaried path never touched for a pure-casual employee
+        verify(payrollRepo, never()).save(any());
+        verify(paymentRepo, never()).save(any());
+
+        ArgumentCaptor<CasualWorkEntry> entryCaptor = ArgumentCaptor.forClass(CasualWorkEntry.class);
+        verify(casualEntryRepo).save(entryCaptor.capture());
+        CasualWorkEntry savedEntry = entryCaptor.getValue();
+        assertThat(savedEntry.getEmployee()).isEqualTo(samuel);
+        assertThat(savedEntry.getRateOverride()).isEqualByComparingTo("9000");
+        assertThat(savedEntry.getSession().getFarm()).isEqualTo(matunda);
+        assertThat(savedEntry.getSession().getActivity()).isEqualTo("Bulk import (Employee pay XLSX)");
+
+        ArgumentCaptor<CasualLabourerPayment> paymentCaptor = ArgumentCaptor.forClass(CasualLabourerPayment.class);
+        verify(casualPaymentRepo).save(paymentCaptor.capture());
+        CasualLabourerPayment payment = paymentCaptor.getValue();
+        assertThat(payment.getEmployee()).isEqualTo(samuel);
+        assertThat(payment.getFarm()).isEqualTo(matunda);
+        assertThat(payment.getAmount()).isEqualByComparingTo("4000");
         assertThat(payment.getNote()).isEqualTo("Bulk import (Employee pay XLSX)");
         assertThat(payment.getPaidBy()).isEqualTo("Peter Khayundi");
     }

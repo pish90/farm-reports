@@ -28,4 +28,11 @@ public interface CasualWorkSessionRepository extends JpaRepository<CasualWorkSes
     @Query("SELECT s FROM CasualWorkSession s LEFT JOIN FETCH s.entries e LEFT JOIN FETCH e.employee " +
            "WHERE s.id = :id AND s.farm.id = :farmId")
     Optional<CasualWorkSession> findByIdAndFarmId(@Param("id") Integer id, @Param("farmId") Integer farmId);
+
+    // Used by the bulk pay importer to find its own shared per-(farm, month) placeholder session
+    // (tagged via `activity`) on re-import, so re-running the import updates entries in place.
+    @Query("SELECT s FROM CasualWorkSession s LEFT JOIN FETCH s.entries e LEFT JOIN FETCH e.employee " +
+           "WHERE s.farm.id = :farmId AND s.sessionDate = :sessionDate AND s.activity = :activity")
+    Optional<CasualWorkSession> findByFarmIdAndSessionDateAndActivity(
+            @Param("farmId") Integer farmId, @Param("sessionDate") LocalDate sessionDate, @Param("activity") String activity);
 }
