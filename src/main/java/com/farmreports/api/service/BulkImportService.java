@@ -95,6 +95,14 @@ public class BulkImportService {
      *  replace its own prior rows without touching payments recorded through the normal UI. */
     private static final String PAY_IMPORT_TAG = "Bulk import (Employee pay XLSX)";
 
+    // The client's own accounting names for expense categories that don't match ours word for
+    // word. Both sides are compared via normalizeCategory, so "&"/"and", case and punctuation
+    // differences need no entry here.
+    private static final Map<String, String> EXPENSE_CATEGORY_ALIASES = Map.ofEntries(
+            Map.entry(normalizeCategory("Vehicles and tractor running expenses"), normalizeCategory("Vehicles & Tractor Expenses")),
+            Map.entry(normalizeCategory("Casual Labour"), normalizeCategory("Casuals")),
+            Map.entry(normalizeCategory("Crop Protection and Spraying"), normalizeCategory("Crop Protection")));
+
     // Template column headers that abbreviate the canonical livestock_types.type value.
     private static final Map<String, String> LIVESTOCK_TYPE_ALIASES = Map.ofEntries(
             Map.entry("WHEIFERS", "WEANERS_HEIFERS"),
@@ -876,7 +884,7 @@ public class BulkImportService {
     private ImportResult runExpenseImport(List<Map<String, String>> rows, Integer userId) {
         Map<String, Farm> farmsByName = loadFarmsByName();
         Map<String, ExpenseCategory> categoriesByName = expenseCategoryRepo.findAll().stream()
-                .collect(Collectors.toMap(c -> c.getAccountName().trim().toLowerCase(), c -> c, (a, b) -> a));
+                .collect(Collectors.toMap(c -> normalizeCategory(c.getAccountName()), c -> c, (a, b) -> a));
         Map<String, ExpenseCategory> categoriesByCode = expenseCategoryRepo.findAll().stream()
                 .collect(Collectors.toMap(c -> c.getAccountCode().trim().toLowerCase(), c -> c, (a, b) -> a));
 
@@ -933,8 +941,9 @@ public class BulkImportService {
             // assigned later by hand from the Reports UI.
             ExpenseCategory category = null;
             if (categoryStr != null) {
-                String key = categoryStr.trim().toLowerCase();
-                category = categoriesByName.getOrDefault(key, categoriesByCode.get(key));
+                String name = normalizeCategory(categoryStr);
+                category = categoriesByName.get(EXPENSE_CATEGORY_ALIASES.getOrDefault(name, name));
+                if (category == null) category = categoriesByCode.get(categoryStr.trim().toLowerCase());
             }
 
             String summary = (farmName != null ? farmName : "?") + " / " + (dateStr != null ? dateStr : "?")
@@ -1020,7 +1029,12 @@ public class BulkImportService {
 
     // ── Shared helpers ───────────────────────────────────────────────────────
 
-    private static String normalizeHeader(String s) {
+    /** Case-, punctuation- and "&"-vs-"and"-insensitive key for matching category names. */
+    private static String normalizeCategory(String s) {
+        return s.toLowerCase().replace("&", " and ").replaceAll("[^a-z0-9]", "");
+    }
+
+        private static String normalizeHeader(String s) {
         return s.toLowerCase().replaceAll("[^a-z0-9]", "");
     }
 

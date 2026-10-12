@@ -719,6 +719,36 @@ class BulkImportServiceTest {
     }
 
     @Test
+    void importExpensesFromCsv_clientCategoryNames_matchedViaAliasesAndAmpersandNormalization() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of(
+                category(1, "4003", "Vehicles & Tractor Expenses"),
+                category(2, "3003", "Casuals"),
+                category(3, "6001", "Crop Protection"),
+                category(4, "4001", "Repairs & Maintenance")));
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(List.of());
+        when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
+        when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
+                new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
+        when(reportRepo.getReferenceById(55)).thenReturn(new MonthlyReport());
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,A.1,X,Tyres,Vehicles and tractor running expenses,100\n"
+                + "Matunda,2026-01-15,A.2,X,Shelling,Casual Labour,100\n"
+                + "Matunda,2026-01-15,A.3,X,Spray,Crop Protection and Spraying,100\n"
+                + "Matunda,2026-01-15,A.4,X,Welding,repairs and maintenance,100\n"
+                + "Matunda,2026-01-15,A.5,X,Water,Water,100\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<Expense> captor = ArgumentCaptor.forClass(Expense.class);
+        verify(expenseRepo, times(5)).save(captor.capture());
+        assertThat(captor.getAllValues()).extracting(e -> e.getCategory() == null ? null : e.getCategory().getAccountCode())
+                .containsExactly("4003", "3003", "6001", "4001", null);
+    }
+
+    @Test
     void importExpensesFromCsv_unrecognizedCategory_leftBlankNotAnError() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of(category(1, "4000", "Fuel")));
