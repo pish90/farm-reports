@@ -45,6 +45,7 @@ import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -545,7 +546,7 @@ class BulkImportServiceTest {
     void importExpensesFromCsv_validRows_appendsToExistingReportWithIncrementingEntryNo() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of(category(1, "4000", "Fuel")));
-        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(Optional.empty());
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(List.of());
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(3);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
                 new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
@@ -587,7 +588,7 @@ class BulkImportServiceTest {
         existing.setSupplierContractor("Old Supplier");
         existing.setCost(new BigDecimal("100.00"));
         when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001"))
-                .thenReturn(Optional.of(existing));
+                .thenReturn(List.of(existing));
         when(expenseRepo.getReferenceById(300)).thenReturn(existing);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
                 new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
@@ -621,10 +622,10 @@ class BulkImportServiceTest {
         existing.setReport(report);
         existing.setEntryNo(2);
         when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1001"))
-                .thenReturn(Optional.of(existing));
+                .thenReturn(List.of(existing));
         when(expenseRepo.getReferenceById(300)).thenReturn(existing);
         when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "INV-1002"))
-                .thenReturn(Optional.empty());
+                .thenReturn(List.of());
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(2);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
                 new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
@@ -644,11 +645,65 @@ class BulkImportServiceTest {
                 .containsExactlyInAnyOrder("INV-1001", "INV-1002");
     }
 
+    private static Expense existingExpense(int id, LocalDate date) {
+        MonthlyReport report = new MonthlyReport();
+        report.setId(55);
+        Expense e = new Expense();
+        e.setId(id);
+        e.setReport(report);
+        e.setEntryNo(id);
+        e.setDate(date);
+        return e;
+    }
+
+    @Test
+    void importExpensesFromCsv_idMatchesSeveralExistingExpenses_narrowsByDateAndUpdatesThatOne() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of());
+        Expense other = existingExpense(300, LocalDate.of(2026, 1, 3));
+        Expense sameDay = existingExpense(301, LocalDate.of(2026, 1, 15));
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "117")).thenReturn(List.of(other, sameDay));
+        when(expenseRepo.getReferenceById(301)).thenReturn(sameDay);
+        when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
+                new ReportDto(55, 1, 2026, 1, null, null, null, null, null));
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,117,ABC Traders,Diesel,,5400.00\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.updatedCount()).isEqualTo(1);
+        ArgumentCaptor<Expense> captor = ArgumentCaptor.forClass(Expense.class);
+        verify(expenseRepo).save(captor.capture());
+        assertThat(captor.getValue().getId()).isEqualTo(301);
+    }
+
+    @Test
+    void importExpensesFromCsv_idAmbiguouslyMatchesSeveralExistingExpenses_rowErrorNotCrash() {
+        when(farmRepo.findAll()).thenReturn(List.of(matunda));
+        when(expenseCategoryRepo.findAll()).thenReturn(List.of());
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(1, "117")).thenReturn(List.of(
+                existingExpense(300, LocalDate.of(2026, 1, 3)), existingExpense(301, LocalDate.of(2026, 2, 9))));
+
+        String csv = "farm,date,ID,supplier,product/service,category,amount\n"
+                + "Matunda,2026-01-15,117,ABC Traders,Diesel,,5400.00\n";
+
+        ImportResult result = bulkImportService.importExpensesFromCsv(expensesCsv(csv), 42);
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().get(0).message())
+                .contains("matches 2 expenses already on Matunda")
+                .contains("2026-01-03, 2026-02-09");
+        verify(expenseRepo, never()).save(any());
+    }
+
     @Test
     void importExpensesFromCsv_duplicateIdWithinFile_rejectsSecondOccurrence() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of());
-        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(Optional.empty());
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(List.of());
 
         String csv = "farm,date,ID,supplier,product/service,category,amount\n"
                 + "Matunda,2026-01-15,INV-1001,ABC Traders,Diesel,,5400.00\n"
@@ -667,7 +722,7 @@ class BulkImportServiceTest {
     void importExpensesFromCsv_unrecognizedCategory_leftBlankNotAnError() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda));
         when(expenseCategoryRepo.findAll()).thenReturn(List.of(category(1, "4000", "Fuel")));
-        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(Optional.empty());
+        when(expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(any(), any())).thenReturn(List.of());
         when(expenseRepo.findMaxEntryNoByReportId(55)).thenReturn(0);
         when(reportService.createOrGetReport(1, 2026, 1, 42)).thenReturn(
                 new ReportDto(55, 1, 2026, 1, null, null, null, null, null));

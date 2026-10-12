@@ -946,8 +946,24 @@ public class BulkImportService {
                 if (!seenInFile.add(dedupeKey)) {
                     issues.add("Duplicate ID in file: '" + receiptNo + "' on " + farm.getName() + " appears more than once");
                 } else {
-                    existingExpenseId = expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(farm.getId(), receiptNo.trim())
-                            .map(Expense::getId).orElse(null);
+                    List<Expense> matches = expenseRepo.findByReport_Farm_IdAndReceiptNoIgnoreCase(farm.getId(), receiptNo.trim());
+                    // Hand-entered receipt numbers can repeat on a farm. Narrow by date before
+                    // giving up, and report a genuinely ambiguous match as a row error rather than
+                    // guessing which existing expense to overwrite.
+                    if (matches.size() > 1 && date != null) {
+                        LocalDate rowDate = date;
+                        List<Expense> sameDate = matches.stream().filter(e -> rowDate.equals(e.getDate())).toList();
+                        if (!sameDate.isEmpty()) matches = sameDate;
+                    }
+                    if (matches.size() == 1) {
+                        existingExpenseId = matches.get(0).getId();
+                    } else if (matches.size() > 1) {
+                        String dates = matches.stream().map(e -> String.valueOf(e.getDate())).sorted()
+                                .collect(Collectors.joining(", "));
+                        issues.add("ID '" + receiptNo.trim() + "' matches " + matches.size() + " expenses already on "
+                                + farm.getName() + " (dated " + dates + ") — can't tell which one to update."
+                                + " Give those expenses distinct IDs first, or use a different ID in this file");
+                    }
                 }
             }
 
