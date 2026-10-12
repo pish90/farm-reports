@@ -143,24 +143,32 @@ public class ImportTemplateService {
             Row lookupHeader = lookup.createRow(0);
             setCell(lookupHeader, 0, "Category", styles.header);
             setCell(lookupHeader, 1, "Account Code", styles.header);
+            setCell(lookupHeader, 2, "Also accepted as", styles.header);
             int r = 1;
             for (ExpenseCategory c : expenseCategoryRepo.findAll()) {
                 Row row = lookup.createRow(r++);
                 setCell(row, 0, c.getAccountName(), styles.plain);
                 setCell(row, 1, c.getAccountCode(), styles.plain);
+                String key = BulkImportService.normalizeCategory(c.getAccountName());
+                String aliases = BulkImportService.EXPENSE_CATEGORY_ALIASES.entrySet().stream()
+                        .filter(e -> BulkImportService.normalizeCategory(e.getValue()).equals(key))
+                        .map(Map.Entry::getKey).sorted()
+                        .collect(Collectors.joining("; "));
+                if (!aliases.isEmpty()) setCell(row, 2, aliases, styles.plain);
             }
-            for (int i = 0; i < 2; i++) lookup.autoSizeColumn(i);
+            for (int i = 0; i < 3; i++) lookup.autoSizeColumn(i);
 
             Sheet notes = wb.createSheet("Instructions");
             writeInstructions(notes, styles, "Expenses import (CSV or XLSX)", List.of(
                     "Required columns: farm, date, ID, amount.",
                     "farm must exactly match one of: " + farmNamesList() + ".",
                     "date must be in yyyy-MM-dd format, e.g. 2026-01-15 — it determines which farm/month report the expense is added to.",
-                    "ID is your own receipt/voucher number. It must be unique per farm — re-uploading a row with an ID " +
-                            "that's already recorded for that farm is rejected as a duplicate rather than creating a second expense.",
-                    "category should match one of the names on the 'Expense Categories' sheet (or its account code). " +
+                    "ID is your own receipt/voucher number and should be unique per farm. Re-uploading a row with an ID " +
+                            "that's already recorded for that farm updates that expense instead of creating a second one.",
+                    "category should match one of the names on the 'Expense Categories' sheet, its account code, or a name " +
+                            "in its 'Also accepted as' column (capitals, punctuation and '&' vs 'and' don't matter). " +
                             "An unrecognized or blank category is imported with no category assigned, to be set later by hand.",
-                    "This import only adds new expense rows — it never deletes or changes anything already recorded.",
+                    "This import never deletes anything: rows with a new ID are added, rows with an existing ID update that expense.",
                     "Delete the two example rows on the first sheet before uploading your own data.",
                     "Upload via ADMIN > Bulk Import > Expenses. Either .csv or .xlsx is accepted."
             ));

@@ -106,6 +106,8 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 ### Migration history (latest first)
 | Version | Description |
 |---|---|
+| V42 | Adds client expense categories `Garden Expenses` (2007), `Land Preparation` (2008), `Water` (4008), guarded by name since prod has categories added outside migrations (`Salaries`, `Security`). Client-specific category name aliases live in `BulkImportService.EXPENSE_CATEGORY_ALIASES` and are listed on the expense import template. |
+| V41 | Replaces `employment_type` with independent `is_salaried`/`is_casual` flags (dual employment type). |
 | V40 | Renames CATTLE `STEER`→`COMPOUND` (client term for animals not taken out to graze); corrects SHEEP sex labels so `RAMS`=male/`EWES`=female for both Les A (was `MALE`/`FEMALE`, never renamed) and Les B (V28 had renamed them backwards). See "Bulk XLSX import" below — these fixes align `livestock_types` with the client's import template. |
 | V39 | Splits legacy `employees.first_name` into first/last name on the first space, for rows migrated from the old `workers`/`casual_labourers` tables (V29) that had the full name jammed into `first_name` with no `last_name`. Single-word names and rows that already have a `last_name` are left untouched. |
 | V38 | Fixes Silas Khayundi's password hash — V37's hash didn't actually verify against `changeme` (copied from a stale CLAUDE.md note). |
@@ -119,7 +121,7 @@ All JPA entities use Lombok `@Getter @Setter @NoArgsConstructor`. Enum columns (
 | V30 | (previous — check file for details) |
 | V29 | Employee unification — merged `workers` into `employees` table; full name stored in `first_name` column (single field, no last_name for migrated workers) |
 
-**Next migration must be V41.**
+**Next migration must be V43.**
 
 ### LS number format
 `ls_number` is `LS` + a globally shared sequence + a single farm letter fixed at hire time, e.g. `LS2001K`. The letter is looked up from the farm name at generation time (`EmployeeIdService.letterFor`) and never changes even if the employee later transfers farms. Mapping: `Les A`→A, `Les B`→B, `Kenlet`→K, `Siyoi`→S, `Matunda`→M.
