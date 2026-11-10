@@ -691,6 +691,7 @@ public class EmployeeService {
     public void deletePayment(Integer farmId, Integer employeeId, Integer paymentId) {
         findOrThrow(farmId, employeeId);
         EmployeePayment payment = paymentRepo.findByIdAndFarmId(paymentId, farmId)
+                .filter(p -> employeeId.equals(p.getEmployeeId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found"));
         paymentRepo.delete(payment);
     }
