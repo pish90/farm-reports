@@ -70,8 +70,12 @@ public final class CasualSheetDtos {
     public record SaveRow(Integer employeeId, String newFirstName, String newLastName,
                           BigDecimal amount, boolean paid) {}
 
+    /**
+     * {@code confirmDuplicate}: the reviewer has confirmed this is a different sheet even though one with the
+     * same activity and date is already saved (or appears earlier in the same request). Without it, save refuses.
+     */
     public record SaveSheet(String activity, String periodText, LocalDate date,
-                            BigDecimal ratePerDay, List<SaveRow> rows) {}
+                            BigDecimal ratePerDay, List<SaveRow> rows, boolean confirmDuplicate) {}
 
     public record SaveRequest(Integer farmId, List<SaveSheet> sheets) {}
 

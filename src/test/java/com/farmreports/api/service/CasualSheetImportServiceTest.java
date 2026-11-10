@@ -92,7 +92,7 @@ class CasualSheetImportServiceTest {
                 new SaveRow(1, null, null, new BigDecimal("1200"), true),
                 new SaveRow(4, null, null, new BigDecimal("880"), false),
                 // Ronald listed again further down the same sheet -> summed into one entry
-                new SaveRow(1, null, null, new BigDecimal("400"), true)));
+                new SaveRow(1, null, null, new BigDecimal("400"), true)), false);
 
         SaveResult r = service.save(new SaveRequest(3, List.of(sheet)), "Silas Khayundi");
 
@@ -125,7 +125,7 @@ class CasualSheetImportServiceTest {
     void newNameCreatesOneActiveCasualEvenIfListedTwice() {
         SaveSheet sheet = new SaveSheet("Collecting of manure", "", saturday, null, List.of(
                 new SaveRow(null, "Lonah", "Chepleting", new BigDecimal("350"), true),
-                new SaveRow(null, "lonah", "chepleting", new BigDecimal("350"), true)));
+                new SaveRow(null, "lonah", "chepleting", new BigDecimal("350"), true)), false);
 
         SaveResult r = service.save(new SaveRequest(3, List.of(sheet)), "Silas");
 
@@ -142,7 +142,7 @@ class CasualSheetImportServiceTest {
     @Test
     void newNameMatchingAnExistingEmployeeReusesThem() {
         SaveSheet sheet = new SaveSheet("Weeding", "", saturday, null, List.of(
-                new SaveRow(null, "joan", "CHERONO", new BigDecimal("500"), false)));
+                new SaveRow(null, "joan", "CHERONO", new BigDecimal("500"), false)), false);
 
         SaveResult r = service.save(new SaveRequest(3, List.of(sheet)), "Silas");
 
@@ -152,8 +152,8 @@ class CasualSheetImportServiceTest {
 
     @Test
     void anInvalidRowAnywhereSavesNothing() {
-        SaveSheet good = new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(1, null, null, new BigDecimal("500"), true)));
-        SaveSheet bad = new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(77, null, null, new BigDecimal("500"), true)));
+        SaveSheet good = new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(1, null, null, new BigDecimal("500"), true)), false);
+        SaveSheet bad = new SaveSheet("Digging", "", saturday, null, List.of(new SaveRow(77, null, null, new BigDecimal("500"), true)), false);
         when(employeeRepo.findByIdAndFarmId(anyInt(), any())).thenAnswer(inv ->
                 (Integer) inv.getArgument(0) == 1 ? Optional.of(emp(1, "Ronald", "Misoi")) : Optional.empty());
 
@@ -167,10 +167,36 @@ class CasualSheetImportServiceTest {
     @Test
     void sheetWithoutDateOrWithZeroAmountIsRejected() {
         assertThatThrownBy(() -> service.save(new SaveRequest(3, List.of(
-                new SaveSheet("Weeding", "", null, null, List.of(new SaveRow(1, null, null, BigDecimal.TEN, true))))), "S"))
+                new SaveSheet("Weeding", "", null, null, List.of(new SaveRow(1, null, null, BigDecimal.TEN, true)), false))), "S"))
                 .hasMessageContaining("date");
         assertThatThrownBy(() -> service.save(new SaveRequest(3, List.of(
-                new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(1, null, null, BigDecimal.ZERO, true))))), "S"))
+                new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(1, null, null, BigDecimal.ZERO, true)), false))), "S"))
                 .hasMessageContaining("more than 0");
+    }
+
+    @Test
+    void sheetAlreadySavedIsRefusedUnlessConfirmed() {
+        when(sessionRepo.existsByFarmIdAndSessionDateAndActivityStartingWithIgnoreCase(3, saturday, "Weeding")).thenReturn(true);
+        SaveSheet repeat = new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(1, null, null, new BigDecimal("500"), true)), false);
+
+        assertThatThrownBy(() -> service.save(new SaveRequest(3, List.of(repeat)), "Silas"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("already saved");
+        verify(sessionRepo, never()).save(any());
+
+        SaveSheet confirmed = new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(1, null, null, new BigDecimal("500"), true)), true);
+        assertThat(service.save(new SaveRequest(3, List.of(confirmed)), "Silas").sheetsSaved()).isEqualTo(1);
+    }
+
+    @Test
+    void sameSheetTwiceInOneUploadIsRefusedAndNothingIsSaved() {
+        SaveSheet first = new SaveSheet("Weeding", "", saturday, null, List.of(new SaveRow(1, null, null, new BigDecimal("500"), true)), false);
+        SaveSheet again = new SaveSheet(" weeding ", "", saturday, null, List.of(new SaveRow(4, null, null, new BigDecimal("500"), true)), false);
+
+        assertThatThrownBy(() -> service.save(new SaveRequest(3, List.of(first, again)), "Silas"))
+                .hasMessageContaining("Sheet 2")
+                .hasMessageContaining("appears twice");
+        verify(sessionRepo, never()).save(any());
+        verify(paymentRepo, never()).save(any());
     }
 }

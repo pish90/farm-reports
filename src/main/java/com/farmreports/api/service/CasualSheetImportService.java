@@ -71,7 +71,7 @@ public class CasualSheetImportService {
             List<Integer> imported = ids.isEmpty() ? List.of()
                     : alreadyImported(request.farmId(), sheet.date(), ids);
             boolean duplicate = sheet.activity() != null && !sheet.activity().isBlank()
-                    && existsSessionStartingWith(request.farmId(), sheet.date(), sheet.activity().trim());
+                    && savedBefore(request.farmId(), sheet.date(), sheet.activity());
             out.add(new CheckSheetResult(sheet.key(), imported, duplicate));
         }
         return new CheckResult(out);
@@ -101,15 +101,8 @@ public class CasualSheetImportService {
         return employeeIds.stream().filter(hits::contains).toList();
     }
 
-    private boolean existsSessionStartingWith(Integer farmId, LocalDate date, String activity) {
-        Long n = em.createQuery(
-                        "SELECT COUNT(s) FROM CasualWorkSession s WHERE s.farm.id = :farmId " +
-                        "AND s.sessionDate = :date AND LOWER(s.activity) LIKE :prefix", Long.class)
-                .setParameter("farmId", farmId)
-                .setParameter("date", date)
-                .setParameter("prefix", activity.toLowerCase(Locale.ROOT) + "%")
-                .getSingleResult();
-        return n != null && n > 0;
+    private boolean savedBefore(Integer farmId, LocalDate date, String activity) {
+        return sessionRepo.existsByFarmIdAndSessionDateAndActivityStartingWithIgnoreCase(farmId, date, activity.trim());
     }
 
     @Transactional
@@ -121,12 +114,25 @@ public class CasualSheetImportService {
 
         // Validate everything first; write nothing if any sheet/row is invalid.
         Map<String, Employee> createdByName = new LinkedHashMap<>();
+        Set<String> sheetsInRequest = new HashSet<>();
         for (int i = 0; i < request.sheets().size(); i++) {
             SaveSheet sheet = request.sheets().get(i);
             String where = "Sheet " + (i + 1);
             if (sheet.date() == null) throw bad(where + ": pick the date (last day of the week worked)");
             if (sheet.date().isAfter(LocalDate.now().plusDays(1))) throw bad(where + ": the date is in the future");
             if (sheet.activity() == null || sheet.activity().isBlank()) throw bad(where + ": enter the activity");
+            // Duplicate guard: the same sheet saved twice would pay everyone on it twice.
+            boolean repeatedInRequest = !sheetsInRequest.add(sheet.date() + "|" + sheet.activity().trim().toLowerCase(Locale.ROOT));
+            if (!sheet.confirmDuplicate()) {
+                if (repeatedInRequest) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, where + " (" + sheet.activity().trim() + ", "
+                            + sheet.date() + ") appears twice in this upload. Remove the repeat, or confirm it is a different sheet.");
+                }
+                if (savedBefore(farm.getId(), sheet.date(), sheet.activity())) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, where + " (" + sheet.activity().trim() + ", "
+                            + sheet.date() + ") looks like a sheet that was already saved. Confirm it is a different sheet to save it.");
+                }
+            }
             if (sheet.rows() == null || sheet.rows().isEmpty()) throw bad(where + ": has no rows to save");
             for (int r = 0; r < sheet.rows().size(); r++) {
                 SaveRow row = sheet.rows().get(r);

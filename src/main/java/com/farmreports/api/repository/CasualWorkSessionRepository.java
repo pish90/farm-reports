@@ -29,6 +29,9 @@ public interface CasualWorkSessionRepository extends JpaRepository<CasualWorkSes
            "WHERE s.id = :id AND s.farm.id = :farmId")
     Optional<CasualWorkSession> findByIdAndFarmId(@Param("id") Integer id, @Param("farmId") Integer farmId);
 
+    /** Scan Casual Sheets duplicate guard: a session on this farm and date whose activity starts with the sheet's activity. */
+    boolean existsByFarmIdAndSessionDateAndActivityStartingWithIgnoreCase(Integer farmId, LocalDate sessionDate, String activityPrefix);
+
     // Used by the bulk pay importer to find its own shared per-(farm, month) placeholder session
     // (tagged via `activity`) on re-import, so re-running the import updates entries in place.
     @Query("SELECT s FROM CasualWorkSession s LEFT JOIN FETCH s.entries e LEFT JOIN FETCH e.employee " +
