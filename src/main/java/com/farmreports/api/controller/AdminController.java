@@ -7,6 +7,8 @@ import com.farmreports.api.security.ClaimsHelper;
 import com.farmreports.api.service.AdminService;
 import com.farmreports.api.service.AuditService;
 import com.farmreports.api.service.BulkImportService;
+import com.farmreports.api.service.CasualSheetImportService;
+import com.farmreports.api.service.CasualSheetScanService;
 import com.farmreports.api.service.EmployeeService;
 import com.farmreports.api.service.ExportService;
 import com.farmreports.api.service.ImportTemplateService;
@@ -38,6 +40,8 @@ public class AdminController {
     private final EmployeeService employeeService;
     private final BulkImportService bulkImportService;
     private final ImportTemplateService importTemplateService;
+    private final CasualSheetScanService casualSheetScanService;
+    private final CasualSheetImportService casualSheetImportService;
 
     private static final MediaType XLSX_MEDIA_TYPE =
             MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -213,6 +217,43 @@ public class AdminController {
     public ResponseEntity<byte[]> downloadCasualPayImportTemplate(Authentication auth) {
         requireAdmin(auth);
         return xlsxAttachment(importTemplateService.buildCasualPayTemplate(), "casual_pay_import_template.xlsx");
+    }
+
+    // ---- Scan handwritten casual pay sheets (read photo -> review -> save) ----
+
+    @PostMapping(value = "/casual-sheets/scan", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<CasualSheetDtos.ScanPageResult> scanCasualSheet(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam Integer farmId,
+            Authentication auth) {
+        requireAdmin(auth);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Photo is required");
+        }
+        // Read-only: nothing is written until the reviewed sheets are saved.
+        return ApiResponse.ok(casualSheetScanService.scanPage(file, farmId));
+    }
+
+    @PostMapping("/casual-sheets/check")
+    public ApiResponse<CasualSheetDtos.CheckResult> checkCasualSheets(
+            @RequestBody CasualSheetDtos.CheckRequest request,
+            Authentication auth) {
+        requireAdmin(auth);
+        return ApiResponse.ok(casualSheetImportService.check(request));
+    }
+
+    @PostMapping("/casual-sheets/save")
+    public ApiResponse<CasualSheetDtos.SaveResult> saveCasualSheets(
+            @RequestBody CasualSheetDtos.SaveRequest request,
+            Authentication auth) {
+        requireAdmin(auth);
+        CasualSheetDtos.SaveResult result = casualSheetImportService.save(request, ClaimsHelper.getUserName(auth));
+        auditService.log(AuditAction.CASUAL_SHEETS_IMPORTED, auth, request.farmId(), null,
+                "CasualWorkSession", null,
+                "Scanned casual sheets: " + result.sheetsSaved() + " sheet(s), " + result.entriesSaved()
+                        + " row(s), earned " + result.totalEarned() + ", paid " + result.totalPaid()
+                        + (result.employeesCreated() > 0 ? ", " + result.employeesCreated() + " new casual(s)" : ""));
+        return ApiResponse.ok(result);
     }
 
     @PostMapping(value = "/expenses/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

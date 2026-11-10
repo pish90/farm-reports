@@ -22,6 +22,9 @@ public interface EmployeeRepository extends JpaRepository<Employee, Integer>, Jp
      *  page so any employee (not just isCasual=true ones) can be picked for a work session. */
     List<Employee> findByFarmIdAndStatus(Integer farmId, String status);
 
+    /** Every employee on a farm (any status) — candidate pool for matching names read off casual sheets. */
+    List<Employee> findByFarmId(Integer farmId);
+
     @Query("SELECT e FROM Employee e ORDER BY e.farm.name, e.firstName, e.lastName")
     List<Employee> findAllOrderByFarmAndName();
 

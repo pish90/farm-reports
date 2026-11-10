@@ -42,6 +42,8 @@ server:
 
 anthropic:
   api-key: ${ANTHROPIC_API_KEY:}
+  # Model that reads handwritten casual pay sheets (Bulk Import > Scan Casual Sheets)
+  sheet-model: ${ANTHROPIC_SHEET_MODEL:claude-opus-5-5}
 
 jwt:
   secret: ${JWT_SECRET:change-this-to-a-secure-256-bit-secret-in-production}

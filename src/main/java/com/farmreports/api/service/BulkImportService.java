@@ -93,7 +93,7 @@ public class BulkImportService {
 
     /** Marks employee_payments rows created by the pay importer, so a re-import can find and
      *  replace its own prior rows without touching payments recorded through the normal UI. */
-    private static final String PAY_IMPORT_TAG = "Bulk import (Employee pay XLSX)";
+    public static final String PAY_IMPORT_TAG = "Bulk import (Employee pay XLSX)";
 
     /** The client's own accounting names for expense categories that don't match ours word for
      *  word (alias -> our category name). Compared via normalizeCategory, so "&"/"and", case and
