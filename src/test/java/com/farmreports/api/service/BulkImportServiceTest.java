@@ -756,13 +756,64 @@ class BulkImportServiceTest {
     }
 
     @Test
-    void importEmployeePay_byEmployeeFile_pointsToCasualPayTab() throws IOException {
+    void importEmployeePay_monthsAcrossFile_goesToPayrollForThatYear() throws IOException {
         MockMultipartFile file = byEmployeeSheet(false,
-                person("Jane Doe", null, new Double[]{100.0, null, null}, new Double[]{100.0, null, null}));
+                person("Eric Terer", null, new Double[]{null, 10800.0, null}, new Double[]{null, 10000.0, null}));
 
-        org.assertj.core.api.Assertions.assertThatThrownBy(
-                        () -> bulkImportService.importEmployeePayFromXlsx(file, 2026, 1, 42, "Peter Khayundi"))
-                .hasMessageContaining("Casual Pay");
+        Employee eric = employee(1, "LS2001K", matunda, "Eric", "Terer");
+        eric.setSalaried(true);
+        when(employeeRepo.findAll()).thenReturn(List.of(eric));
+        when(payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(1, 2026, 2, 1)).thenReturn(Optional.empty());
+        when(paymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(1), eq(1), any(), any()))
+                .thenReturn(List.of());
+
+        // startMonth (5) only applies to the old one-row-per-month layout; months come from the headers
+        ImportResult result = bulkImportService.importEmployeePayFromXlsx(file, 2026, 5, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<PayrollEntry> captor = ArgumentCaptor.forClass(PayrollEntry.class);
+        verify(payrollRepo).save(captor.capture());
+        assertThat(captor.getValue().getYear()).isEqualTo(2026);
+        assertThat(captor.getValue().getMonth()).isEqualTo(2);
+        assertThat(captor.getValue().getGrossSalary()).isEqualByComparingTo("10800");
+        assertThat(captor.getValue().getAmountPaid()).isEqualByComparingTo("10000");
+    }
+
+    @Test
+    void importEmployeePay_downloadedTemplate_listsSalariedAndRoundTrips() throws IOException {
+        Farm lesB = new Farm();
+        lesB.setId(3);
+        lesB.setName("Les B");
+        Employee jane = employee(7, "LS2001B", lesB, "Jane", "Doe");
+        jane.setCasual(true); // casual only: must not appear in the employee pay template
+        Employee eric = employee(8, "LS2002B", lesB, "Eric", "Terer");
+        eric.setSalaried(true);
+        when(employeeRepo.findAllOrderByFarmAndName()).thenReturn(List.of(eric, jane));
+
+        ImportTemplateService templates = new ImportTemplateService(farmRepo, livestockTypeRepo, employeeRepo, expenseCategoryRepo);
+        XSSFWorkbook wb = new XSSFWorkbook(new java.io.ByteArrayInputStream(templates.buildEmployeePayTemplate()));
+        Sheet sheet = wb.getSheetAt(0);
+        assertThat(sheet.getRow(0).getCell(4).getStringCellValue()).isEqualTo("Jan");
+        assertThat(sheet.getRow(1).getCell(0).getStringCellValue()).isEqualTo("Eric Terer");
+        assertThat(sheet.getRow(1).getCell(2).getStringCellValue()).isEqualTo("Salaried");
+        assertThat(sheet.getLastRowNum()).isEqualTo(2); // header + one Earned/Paid pair
+        sheet.getRow(1).createCell(6).setCellValue(12000); // Earned, Mar
+        sheet.getRow(2).createCell(6).setCellValue(9000);  // Paid, Mar
+        MockMultipartFile file = toXlsx(wb, "employee_pay_import_template.xlsx");
+
+        when(employeeRepo.findAll()).thenReturn(List.of(jane, eric));
+        when(payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(3, 2026, 3, 8)).thenReturn(Optional.empty());
+        when(paymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(8), eq(3), any(), any()))
+                .thenReturn(List.of());
+
+        ImportResult result = bulkImportService.importEmployeePayFromXlsx(file, 2026, 1, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<PayrollEntry> captor = ArgumentCaptor.forClass(PayrollEntry.class);
+        verify(payrollRepo).save(captor.capture());
+        assertThat(captor.getValue().getMonth()).isEqualTo(3);
+        assertThat(captor.getValue().getGrossSalary()).isEqualByComparingTo("12000");
+        assertThat(captor.getValue().getAmountPaid()).isEqualByComparingTo("9000");
     }
 
     // ── Expenses ─────────────────────────────────────────────────────────────

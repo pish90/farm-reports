@@ -416,7 +416,12 @@ public class BulkImportService {
     // ── Employee pay ─────────────────────────────────────────────────────────
 
     /**
-     * Imports the "Employee pay_import" sheet: one row per calendar month, one Earned/Paid
+     * Imports an Employee Pay workbook. The current template ({@link ImportTemplateService#buildEmployeePayTemplate})
+     * uses the same layout as Casual Pay — months across the top, one Earned/Paid row pair per
+     * employee — and is detected by month headers in row 1 and handed to {@link #doImportPayByEmployee}
+     * with {@code startYear} as the year. Everything below describes the older layout, still accepted:
+     *
+     * The older "Employee pay_import" sheet: one row per calendar month, one Earned/Paid
      * column pair per employee, headed by the employee's full name (e.g. "John Mwangi"; disambiguated
      * as "John Mwangi (Kenlet)" when the same name exists on more than one farm — see
      * {@link ImportTemplateService#buildEmployeePayTemplate}). Bare LS numbers (e.g. "LS2001", without the farm-letter suffix
@@ -444,15 +449,23 @@ public class BulkImportService {
     public ImportResult importEmployeePayFromXlsx(MultipartFile file, Integer startYear, Integer startMonth,
                                                     Integer userId, String paidByName) {
         try (Workbook workbook = openWorkbook(file)) {
-            return doImportEmployeePay(checkedSheet(workbook), startYear, startMonth, paidByName);
+            Sheet sheet = checkedSheet(workbook);
+            Row firstRow = sheet.getRow(sheet.getFirstRowNum());
+            if (firstRow != null && !monthColumns(firstRow).isEmpty()) {
+                // The current template: months across the top, one Earned/Paid row pair per employee
+                // (same layout as Casual Pay). startYear is the year; startMonth doesn't apply.
+                recalculateFormulas(workbook);
+                return doImportPayByEmployee(sheet, startYear, paidByName);
+            }
+            return doImportEmployeePay(sheet, startYear, startMonth, paidByName);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error closing XLSX file");
         } catch (ResponseStatusException e) {
             throw e;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Could not read this file — check it matches the downloaded template's layout "
-                            + "(two header rows, Month in column A). Detail: " + e.getMessage());
+                    "Could not read this file — check it matches the downloaded Employee Pay template's layout "
+                            + "(employee names down the side, months across the top). Detail: " + e.getMessage());
         }
     }
 
@@ -465,12 +478,6 @@ public class BulkImportService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "XLSX file must have two header rows (employee name, then Earned/Paid)");
         }
-        if (monthColumns(headerRow).size() >= 2) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "This file has months across the top row (one row per employee) — upload it under "
-                            + "Bulk Import > Casual Pay instead of Employee Pay.");
-        }
-
         int lastCol = Math.max(headerRow.getLastCellNum(), subHeaderRow.getLastCellNum());
         Map<Integer, String> headerKeyByColumn = new LinkedHashMap<>();
         String currentHeaderKey = null;
@@ -665,7 +672,7 @@ public class BulkImportService {
             throw e;
         } catch (RuntimeException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Could not read this file — check it matches the downloaded Casual Pay template's layout "
+                    "Could not read this file — check it matches the downloaded Casual Pay / Employee Pay template's layout "
                             + "(employee names down the side, months across the top). Detail: " + e.getMessage());
         }
     }

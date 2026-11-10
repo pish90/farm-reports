@@ -330,91 +330,42 @@ public class ImportTemplateService {
         }
     }
 
-    // ── Employee pay import ──────────────────────────────────────────────────
+    // ── Employee pay + Casual pay imports (same layout) ──────────────────────
 
+    private static final String[] PAY_FIXED_COLUMNS = {"Employee", "Farm", "Type", "Earned/Paid"};
+    private static final String[] PAY_MONTHS = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+    /**
+     * Employee pay template in the client's "by employee" layout (the same as Casual Pay): one
+     * Earned row and one Paid row per employee, months Jan..Dec across the top, pre-filled with
+     * every active salaried employee (including those also casual), grouped by farm. Read by
+     * {@link BulkImportService#importEmployeePayFromXlsx}; the Type column is informational only.
+     */
     @Transactional(readOnly = true)
     public byte[] buildEmployeePayTemplate() {
-        try (XSSFWorkbook wb = new XSSFWorkbook()) {
-            Styles styles = new Styles(wb);
-            Sheet sheet = wb.createSheet("Employee pay_import");
-
-            List<Employee> employees = employeeRepo.findAllOrderByFarmAndName().stream()
-                    .filter(e -> e.getLsNumber() != null && e.getLsNumber().matches("^LS\\d+[A-Z]$"))
-                    .toList();
-
-            Map<String, Long> nameCounts = employees.stream()
-                    .collect(Collectors.groupingBy(e -> e.getFullName().trim().toLowerCase(), Collectors.counting()));
-
-            Row nameRow = sheet.createRow(0);
-            Row subHeaderRow = sheet.createRow(1);
-            setCell(subHeaderRow, 0, "Month", styles.header);
-
-            int col = 1;
-            for (Employee emp : employees) {
-                String headerKey = employeeHeaderKey(emp, nameCounts);
-                setCell(nameRow, col, headerKey, styles.header);
-                setCell(nameRow, col + 1, "", styles.header);
-                setCell(subHeaderRow, col, "Earned", styles.header);
-                setCell(subHeaderRow, col + 1, "Paid", styles.header);
-                sheet.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(0, 0, col, col + 1));
-                col += 2;
-            }
-
-            Row example = sheet.createRow(2);
-            setCell(example, 0, "Jan", styles.example);
-            if (!employees.isEmpty()) {
-                setCell(example, 1, 50000, styles.example);
-                setCell(example, 2, 50000, styles.example);
-            }
-
-            for (int i = 0; i < col; i++) sheet.autoSizeColumn(i);
-            sheet.createFreezePane(1, 2);
-
-            Sheet lookup = wb.createSheet("Employee Reference");
-            Row lookupHeader = lookup.createRow(0);
-            setCell(lookupHeader, 0, "Column Header", styles.header);
-            setCell(lookupHeader, 1, "Name", styles.header);
-            setCell(lookupHeader, 2, "Farm", styles.header);
-            setCell(lookupHeader, 3, "LS Number", styles.header);
-            int r = 1;
-            for (Employee emp : employees) {
-                Row row = lookup.createRow(r++);
-                setCell(row, 0, employeeHeaderKey(emp, nameCounts), styles.plain);
-                setCell(row, 1, emp.getFullName(), styles.plain);
-                setCell(row, 2, emp.getFarm().getName(), styles.plain);
-                setCell(row, 3, emp.getLsNumber().substring(0, emp.getLsNumber().length() - 1), styles.plain);
-            }
-            for (int i = 0; i < 4; i++) lookup.autoSizeColumn(i);
-
-            Sheet notes = wb.createSheet("Instructions");
-            writeInstructions(notes, styles, "Employee pay import (XLSX only)", List.of(
-                    "Two header rows: row 1 has each employee's full name, row 2 has Earned/Paid sub-columns.",
-                    "If two employees share the same name across different farms, their columns are headed \"Name (Farm)\" " +
-                            "instead — check the 'Employee Reference' sheet if unsure which column is which.",
-                    "The 'Employee Reference' sheet maps each column header to the employee's name, farm, and LS number for reference. " +
-                            "Bare LS numbers (e.g. 'LS2001') are still accepted as column headers too, for older spreadsheets.",
-                    "One data row per calendar month, in sequence, starting from the (year, month) you choose in the upload dialog " +
-                            "(e.g. if you pick 2026-01, row 1 of data = Jan 2026, row 2 = Feb 2026, and so on).",
-                    "The Month label in column A must match the expected month for that row's position — it's a cross-check, not free text.",
-                    "Leave both Earned and Paid blank for an employee/month with nothing to import; either can be filled independently.",
-                    "'Earned' updates the payroll gross salary; 'Paid' updates both the payroll amount-paid and the employee's payment ledger.",
-                    "Re-uploading for the same employee/month replaces the previously imported Paid amount rather than duplicating it.",
-                    "Upload via ADMIN > Bulk Import > Employee Pay, selecting the starting year/month for row 1."
-            ));
-
-            return toBytes(wb);
-        } catch (IOException e) {
-            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not build template");
-        }
-    }
-
-    /** The Employee pay import column header for this employee: their full name, or
-     *  "Name (Farm)" when that name is shared by employees on more than one farm — must match
-     *  {@link BulkImportService}'s header-resolution logic exactly. */
-    private String employeeHeaderKey(Employee emp, Map<String, Long> nameCounts) {
-        String name = emp.getFullName();
-        long count = nameCounts.getOrDefault(name.trim().toLowerCase(), 0L);
-        return count > 1 ? name + " (" + emp.getFarm().getName() + ")" : name;
+        return buildPayByEmployeeTemplate("Employee pay_import",
+                employeeRepo.findAllOrderByFarmAndName().stream()
+                        .filter(e -> e.isActive() && e.isSalaried())
+                        .toList(),
+                "Employee pay import (XLSX only)", List.of(
+                        "One Earned row and one Paid row per employee; one column per month (Jan to Dec). "
+                                + "This sheet is pre-filled with every active salaried employee — delete rows for anyone "
+                                + "you don't need, and add rows (Employee, Farm, Earned/Paid) for anyone missing.",
+                        "The file has no year column: pick the year these figures belong to in the upload dialog. "
+                                + "One upload covers one year.",
+                        "Enter each month's total for that employee. Leave a month blank to leave it unchanged; "
+                                + "Earned and Paid can be filled independently. Excel formulas like =8000+2800 are fine.",
+                        "Employee and Farm must match the app exactly (spelling is checked, capitals and punctuation "
+                                + "are not). The Farm column may be left out entirely if no name is shared between farms.",
+                        "The Type column is for reference only and is ignored on upload.",
+                        "'Earned' updates the payroll gross salary; 'Paid' updates both the payroll amount paid and "
+                                + "the employee's payment ledger.",
+                        "Re-uploading the same employee/month replaces the figures from the previous upload — it never "
+                                + "adds them twice, and never touches payments recorded by hand in the app.",
+                        "If any row has a problem (unknown name, bad amount, an employee listed twice), nothing is "
+                                + "imported — fix the rows listed and upload again.",
+                        "Upload via ADMIN > Bulk Import > Employee Pay."
+                ));
     }
 
     /**
@@ -425,19 +376,40 @@ public class ImportTemplateService {
      */
     @Transactional(readOnly = true)
     public byte[] buildCasualPayTemplate() {
+        return buildPayByEmployeeTemplate("Casual pay_import",
+                employeeRepo.findAllOrderByFarmAndName().stream()
+                        .filter(e -> e.isActive() && e.isCasual())
+                        .toList(),
+                "Casual pay import (XLSX only)", List.of(
+                        "One Earned row and one Paid row per employee; one column per month (Jan to Dec). "
+                                + "This sheet is pre-filled with every active casual employee — delete rows for anyone "
+                                + "you don't need, and add rows (Employee, Farm, Earned/Paid) for anyone missing.",
+                        "The file has no year column: pick the year these figures belong to in the upload dialog. "
+                                + "One upload covers one year.",
+                        "Enter each month's total for that employee. Leave a month blank to leave it unchanged; "
+                                + "Earned and Paid can be filled independently. Excel formulas like =800+400 are fine.",
+                        "Employee and Farm must match the app exactly (spelling is checked, capitals and punctuation "
+                                + "are not). The Farm column may be left out entirely if no name is shared between farms.",
+                        "The Type column is for reference only and is ignored on upload.",
+                        "Casual-only employees go to the casual ledger. Employees who are also salaried go to Payroll "
+                                + "(Earned = gross salary, Paid = amount paid), the same as the Employee Pay import.",
+                        "Re-uploading the same employee/month replaces the figures from the previous upload — it never "
+                                + "adds them twice, and never touches payments recorded by hand in the app.",
+                        "If any row has a problem (unknown name, bad amount, an employee listed twice), nothing is "
+                                + "imported — fix the rows listed and upload again.",
+                        "Upload via ADMIN > Bulk Import > Casual Pay."
+                ));
+    }
+
+    private byte[] buildPayByEmployeeTemplate(String sheetName, List<Employee> employees,
+                                              String title, List<String> instructions) {
         try (XSSFWorkbook wb = new XSSFWorkbook()) {
             Styles styles = new Styles(wb);
-            Sheet sheet = wb.createSheet("Casual pay_import");
+            Sheet sheet = wb.createSheet(sheetName);
 
-            List<Employee> employees = employeeRepo.findAllOrderByFarmAndName().stream()
-                    .filter(e -> e.isActive() && e.isCasual())
-                    .toList();
-
-            String[] fixed = {"Employee", "Farm", "Type", "Earned/Paid"};
-            String[] months = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
             Row header = sheet.createRow(0);
-            for (int i = 0; i < fixed.length; i++) setCell(header, i, fixed[i], styles.header);
-            for (int i = 0; i < months.length; i++) setCell(header, fixed.length + i, months[i], styles.header);
+            for (int i = 0; i < PAY_FIXED_COLUMNS.length; i++) setCell(header, i, PAY_FIXED_COLUMNS[i], styles.header);
+            for (int i = 0; i < PAY_MONTHS.length; i++) setCell(header, PAY_FIXED_COLUMNS.length + i, PAY_MONTHS[i], styles.header);
 
             int r = 1;
             for (Employee emp : employees) {
@@ -445,7 +417,8 @@ public class ImportTemplateService {
                 Row paid = sheet.createRow(r + 1);
                 setCell(earned, 0, emp.getFullName(), styles.plain);
                 setCell(earned, 1, emp.getFarm().getName(), styles.plain);
-                setCell(earned, 2, emp.isSalaried() ? "Salaried + Casual" : "Casual", styles.plain);
+                setCell(earned, 2, emp.isSalaried() && emp.isCasual() ? "Salaried + Casual"
+                        : emp.isSalaried() ? "Salaried" : "Casual", styles.plain);
                 setCell(earned, 3, "Earned", styles.plain);
                 setCell(paid, 3, "Paid", styles.plain);
                 for (int c = 0; c < 3; c++) {
@@ -454,30 +427,10 @@ public class ImportTemplateService {
                 r += 2;
             }
 
-            for (int i = 0; i < fixed.length; i++) sheet.autoSizeColumn(i);
-            sheet.createFreezePane(fixed.length, 1);
+            for (int i = 0; i < PAY_FIXED_COLUMNS.length; i++) sheet.autoSizeColumn(i);
+            sheet.createFreezePane(PAY_FIXED_COLUMNS.length, 1);
 
-            Sheet notes = wb.createSheet("Instructions");
-            writeInstructions(notes, styles, "Casual pay import (XLSX only)", List.of(
-                    "One Earned row and one Paid row per employee; one column per month (Jan to Dec). "
-                            + "This sheet is pre-filled with every active casual employee — delete rows for anyone "
-                            + "you don't need, and add rows (Employee, Farm, Earned/Paid) for anyone missing.",
-                    "The file has no year column: pick the year these figures belong to in the upload dialog. "
-                            + "One upload covers one year.",
-                    "Enter each month's total for that employee. Leave a month blank to leave it unchanged; "
-                            + "Earned and Paid can be filled independently. Excel formulas like =800+400 are fine.",
-                    "Employee and Farm must match the app exactly (spelling is checked, capitals and punctuation "
-                            + "are not). The Farm column may be left out entirely if no name is shared between farms.",
-                    "The Type column is for reference only and is ignored on upload.",
-                    "Casual-only employees go to the casual ledger. Employees who are also salaried go to Payroll "
-                            + "(Earned = gross salary, Paid = amount paid), the same as the Employee Pay import.",
-                    "Re-uploading the same employee/month replaces the figures from the previous upload — it never "
-                            + "adds them twice, and never touches payments recorded by hand in the app.",
-                    "If any row has a problem (unknown name, bad amount, an employee listed twice), nothing is "
-                            + "imported — fix the rows listed and upload again.",
-                    "Upload via ADMIN > Bulk Import > Casual Pay."
-            ));
-
+            writeInstructions(wb.createSheet("Instructions"), styles, title, instructions);
             return toBytes(wb);
         } catch (IOException e) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not build template");
