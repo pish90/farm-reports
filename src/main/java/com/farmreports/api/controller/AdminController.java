@@ -190,6 +190,31 @@ public class AdminController {
         return xlsxAttachment(importTemplateService.buildEmployeePayTemplate(), "employee_pay_import_template.xlsx");
     }
 
+    @PostMapping(value = "/casual-pay/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<ImportResult> importCasualPay(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam Integer year,
+            Authentication auth) {
+        requireAdmin(auth);
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is required");
+        }
+        ImportResult result = bulkImportService.importPayByEmployeeFromXlsx(
+                file, year, ClaimsHelper.getUserId(auth), ClaimsHelper.getUserName(auth));
+        if (result.success()) {
+            auditService.log(AuditAction.EMPLOYEE_PAY_XLSX_IMPORTED, auth, null, null,
+                    "PayrollEntry", null,
+                    "Casual pay XLSX import for " + year + ": " + result.importedCount() + " employee(s) updated");
+        }
+        return ApiResponse.ok(result);
+    }
+
+    @GetMapping("/casual-pay/import/template")
+    public ResponseEntity<byte[]> downloadCasualPayImportTemplate(Authentication auth) {
+        requireAdmin(auth);
+        return xlsxAttachment(importTemplateService.buildCasualPayTemplate(), "casual_pay_import_template.xlsx");
+    }
+
     @PostMapping(value = "/expenses/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ApiResponse<ImportResult> importExpenses(
             @RequestParam("file") MultipartFile file,

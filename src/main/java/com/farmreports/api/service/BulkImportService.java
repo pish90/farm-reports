@@ -465,6 +465,11 @@ public class BulkImportService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "XLSX file must have two header rows (employee name, then Earned/Paid)");
         }
+        if (monthColumns(headerRow).size() >= 2) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "This file has months across the top row (one row per employee) — upload it under "
+                            + "Bulk Import > Casual Pay instead of Employee Pay.");
+        }
 
         int lastCol = Math.max(headerRow.getLastCellNum(), subHeaderRow.getLastCellNum());
         Map<Integer, String> headerKeyByColumn = new LinkedHashMap<>();
@@ -504,22 +509,11 @@ public class BulkImportService {
             employeeColumns.add(new EmployeeColumns(e.getKey(), e.getValue()[0], e.getValue()[1]));
         }
 
-        List<Employee> validEmployees = employeeRepo.findAll().stream()
-                .filter(emp -> emp.getLsNumber() != null && emp.getLsNumber().matches("^LS\\d+[A-Z]$"))
-                .toList();
-        Map<String, Employee> employeesByLsNumber = validEmployees.stream()
-                .collect(Collectors.toMap(
-                        emp -> emp.getLsNumber().substring(0, emp.getLsNumber().length() - 1),
-                        emp -> emp, (a, b) -> a));
-        Map<String, Employee> employeesByNameAndFarm = validEmployees.stream()
-                .collect(Collectors.toMap(
-                        emp -> normalizeName(emp.getFullName() + emp.getFarm().getName()),
-                        emp -> emp, (a, b) -> a));
-        Map<String, List<Employee>> employeesByName = validEmployees.stream()
-                .collect(Collectors.groupingBy(emp -> normalizeName(emp.getFullName())));
+        PayLookup lookup = buildPayLookup();
+        Map<String, Employee> employeesByLsNumber = lookup.byLsNumber();
+        Map<String, Employee> employeesByNameAndFarm = lookup.byNameAndFarm();
+        Map<String, List<Employee>> employeesByName = lookup.byName();
 
-        record PreparedEntry(Integer employeeId, Integer farmId, boolean casual, BigDecimal earned, BigDecimal paid) {}
-        record PreparedRow(int year, int month, List<PreparedEntry> entries) {}
         List<PreparedRow> prepared = new ArrayList<>();
         List<ImportRowError> errors = new ArrayList<>();
         int dataRowCount = 0;
@@ -571,11 +565,7 @@ public class BulkImportService {
                 }
                 if ((earnedStr != null && earned == null) || (paidStr != null && paid == null)) continue;
 
-                // Salaried takes priority for an employee marked both (dual employment type):
-                // this preserves the existing payroll-entries path unchanged, and only routes
-                // pure-casual employees (salaried = false) to the casual ledger below.
-                boolean routeCasual = employee.isCasual() && !employee.isSalaried();
-                entries.add(new PreparedEntry(employee.getId(), employee.getFarm().getId(), routeCasual, earned, paid));
+                entries.add(preparedEntry(employee, earned, paid));
             }
 
             String summary = (monthStr != null ? monthStr : "?") + " " + expectedYear;
@@ -590,7 +580,42 @@ public class BulkImportService {
             return new ImportResult(false, dataRowCount, 0, 0, errors);
         }
 
-        int imported = 0;
+        applyPayRows(prepared, paidByName);
+        return new ImportResult(true, dataRowCount, prepared.size(), 0, List.of());
+    }
+
+    // ── Pay import shared plumbing (both layouts) ────────────────────────────
+
+    private record PreparedEntry(Integer employeeId, Integer farmId, boolean casual, BigDecimal earned, BigDecimal paid) {}
+
+    private record PreparedRow(int year, int month, List<PreparedEntry> entries) {}
+
+    private record PayLookup(Map<String, Employee> byLsNumber, Map<String, Employee> byNameAndFarm,
+                             Map<String, List<Employee>> byName) {}
+
+    private PayLookup buildPayLookup() {
+        List<Employee> validEmployees = employeeRepo.findAll().stream()
+                .filter(emp -> emp.getLsNumber() != null && emp.getLsNumber().matches("^LS\\d+[A-Z]$"))
+                .toList();
+        return new PayLookup(
+                validEmployees.stream().collect(Collectors.toMap(
+                        emp -> emp.getLsNumber().substring(0, emp.getLsNumber().length() - 1),
+                        emp -> emp, (a, b) -> a)),
+                validEmployees.stream().collect(Collectors.toMap(
+                        emp -> normalizeName(emp.getFullName() + emp.getFarm().getName()),
+                        emp -> emp, (a, b) -> a)),
+                validEmployees.stream().collect(Collectors.groupingBy(emp -> normalizeName(emp.getFullName()))));
+    }
+
+    /** Salaried takes priority for an employee marked both (dual employment type): this preserves
+     *  the payroll-entries path unchanged, and only routes pure-casual employees (salaried = false)
+     *  to the casual ledger. */
+    private static PreparedEntry preparedEntry(Employee employee, BigDecimal earned, BigDecimal paid) {
+        boolean routeCasual = employee.isCasual() && !employee.isSalaried();
+        return new PreparedEntry(employee.getId(), employee.getFarm().getId(), routeCasual, earned, paid);
+    }
+
+    private void applyPayRows(List<PreparedRow> prepared, String paidByName) {
         for (PreparedRow row : prepared) {
             for (PreparedEntry entry : row.entries()) {
                 if (entry.casual()) {
@@ -610,9 +635,261 @@ public class BulkImportService {
                     }
                 }
             }
-            imported++;
         }
-        return new ImportResult(true, dataRowCount, imported, 0, List.of());
+    }
+
+    // ── Casual pay import (one row pair per employee, months across) ─────────
+
+    /**
+     * Imports the "by employee" pay layout: one Earned row and one Paid row per employee, one
+     * column per calendar month (Jan..Dec headers in row 1), for a single caller-chosen year.
+     * The employee name column may be merged across its two rows (only the top cell holds the
+     * value, so a blank name on the second row inherits from the row above). An optional Farm
+     * column disambiguates names shared across farms and, when present, is matched strictly;
+     * any other non-month column (e.g. Type) is ignored.
+     *
+     * Writes go through exactly the same path as {@link #importEmployeePayFromXlsx} — pure-casual
+     * employees to the tagged casual ledger, salaried/dual employees to payroll — so re-importing
+     * either layout for the same employee/month replaces the previous import rather than adding
+     * to it. All-or-nothing: any error means nothing is written.
+     */
+    @Transactional
+    public ImportResult importPayByEmployeeFromXlsx(MultipartFile file, Integer year, Integer userId,
+                                                     String paidByName) {
+        try (Workbook workbook = openWorkbook(file)) {
+            recalculateFormulas(workbook);
+            return doImportPayByEmployee(checkedSheet(workbook), year, paidByName);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Error closing XLSX file");
+        } catch (ResponseStatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Could not read this file — check it matches the downloaded Casual Pay template's layout "
+                            + "(employee names down the side, months across the top). Detail: " + e.getMessage());
+        }
+    }
+
+    private static final Set<String> NAME_HEADERS = Set.of("employee", "employees", "name", "employeename", "fullname");
+    private static final Set<String> LABEL_HEADERS = Set.of("month", "earnedpaid", "paidearned");
+
+    private ImportResult doImportPayByEmployee(Sheet sheet, int year, String paidByName) {
+        int headerRowNum = sheet.getFirstRowNum();
+        Row header = sheet.getRow(headerRowNum);
+        if (header == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "XLSX file has no header row");
+        }
+
+        Map<Integer, Integer> monthByCol = monthColumns(header);
+        if (monthByCol.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Row 1 must have month column headers (Jan, Feb, ... Dec)");
+        }
+        if (monthByCol.values().stream().distinct().count() != monthByCol.size()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A month appears more than once in row 1");
+        }
+        int firstMonthCol = monthByCol.keySet().stream().min(Integer::compare).orElseThrow();
+
+        Integer nameCol = null, farmCol = null, labelCol = null;
+        for (int col = 0; col < firstMonthCol; col++) {
+            String v = readCellAsString(header.getCell(col));
+            if (v == null) continue;
+            String h = normalizeHeader(v);
+            if (NAME_HEADERS.contains(h)) nameCol = col;
+            else if (h.equals("farm") || h.equals("farmname")) farmCol = col;
+            else if (LABEL_HEADERS.contains(h)) labelCol = col;
+        }
+        if (labelCol == null) labelCol = findEarnedPaidColumn(sheet, headerRowNum, firstMonthCol);
+        if (labelCol == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Couldn't find the column that labels each row 'Earned' or 'Paid' (left of the month columns)");
+        }
+        if (nameCol == null) {
+            for (int col = 0; col < firstMonthCol; col++) {
+                if (col != labelCol && (farmCol == null || col != farmCol)) { nameCol = col; break; }
+            }
+        }
+        if (nameCol == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Couldn't find the employee name column");
+        }
+
+        // Pass 1: group sheet rows into one block per employee (an Earned row + a Paid row).
+        final class Block {
+            final int excelRow;
+            final String name;
+            final String farm;
+            final Map<Integer, String> earned = new LinkedHashMap<>();
+            final Map<Integer, String> paid = new LinkedHashMap<>();
+            boolean sawEarned, sawPaid;
+            Block(int excelRow, String name, String farm) { this.excelRow = excelRow; this.name = name; this.farm = farm; }
+            String label() { return farm != null ? name + " (" + farm + ")" : name; }
+        }
+        List<Block> blocks = new ArrayList<>();
+        List<ImportRowError> errors = new ArrayList<>();
+        Block current = null;
+
+        for (int r = headerRowNum + 1; r <= sheet.getLastRowNum(); r++) {
+            Row row = sheet.getRow(r);
+            int excelRow = r + 1;
+            if (row == null || isRowBlank(row)) { current = null; continue; }
+
+            String name = readCellAsString(row.getCell(nameCol));
+            String farm = farmCol != null ? readCellAsString(row.getCell(farmCol)) : null;
+            String labelStr = readCellAsString(row.getCell(labelCol));
+            Map<Integer, String> values = new LinkedHashMap<>();
+            monthByCol.forEach((col, month) -> {
+                String v = readCellAsString(row.getCell(col));
+                if (v != null) values.put(month, v);
+            });
+
+            if (labelStr == null) {
+                if (!values.isEmpty()) {
+                    errors.add(new ImportRowError(excelRow, name != null ? name : "?",
+                            "Row has amounts but no 'Earned' or 'Paid' label"));
+                }
+                continue;
+            }
+            String label = labelStr.trim().toLowerCase();
+            boolean isEarned = label.startsWith("earn");
+            boolean isPaid = label.startsWith("paid");
+            if (!isEarned && !isPaid) {
+                errors.add(new ImportRowError(excelRow, name != null ? name : "?",
+                        "Label must be 'Earned' or 'Paid', got '" + labelStr + "'"));
+                continue;
+            }
+
+            boolean continuesCurrent = current != null
+                    && (name == null || (normalizeName(name).equals(normalizeName(current.name))
+                        && (farm == null || current.farm == null || normalizeName(farm).equals(normalizeName(current.farm)))))
+                    && (isEarned ? !current.sawEarned : !current.sawPaid);
+            if (!continuesCurrent) {
+                if (name == null) {
+                    errors.add(new ImportRowError(excelRow, "?", current == null
+                            ? "No employee name for this row"
+                            : "Second '" + labelStr + "' row with no name under " + current.label()
+                                + " — each employee needs exactly one Earned and one Paid row"));
+                    continue;
+                }
+                current = new Block(excelRow, name.trim(), farm != null ? farm.trim() : null);
+                blocks.add(current);
+            }
+            if (isEarned) { current.sawEarned = true; current.earned.putAll(values); }
+            else { current.sawPaid = true; current.paid.putAll(values); }
+        }
+
+        // Pass 2: resolve each block to an employee and validate its amounts.
+        PayLookup lookup = buildPayLookup();
+        Map<Integer, Integer> firstRowByEmployeeId = new LinkedHashMap<>();
+        Map<YearMonth, List<PreparedEntry>> entriesByMonth = new java.util.TreeMap<>();
+        int employeesWithData = 0;
+
+        for (Block b : blocks) {
+            if (b.earned.isEmpty() && b.paid.isEmpty()) continue; // nothing to import for this person
+            List<String> issues = new ArrayList<>();
+
+            Employee employee;
+            if (b.farm != null) {
+                employee = lookup.byNameAndFarm().get(normalizeName(b.name + b.farm));
+                if (employee == null) issues.add("No employee named '" + b.name + "' on farm '" + b.farm + "'");
+            } else {
+                employee = resolveEmployeeColumn(b.name, lookup.byLsNumber(), lookup.byNameAndFarm(),
+                        lookup.byName(), issues);
+            }
+            if (employee != null) {
+                Integer earlier = firstRowByEmployeeId.putIfAbsent(employee.getId(), b.excelRow);
+                if (earlier != null) {
+                    issues.add("Same employee as row " + earlier + " — each employee may appear only once");
+                }
+            }
+
+            Map<Integer, BigDecimal[]> amountsByMonth = new java.util.TreeMap<>();
+            for (int month = 1; month <= 12; month++) {
+                String e = b.earned.get(month), p = b.paid.get(month);
+                if (e == null && p == null) continue;
+                BigDecimal earned = null, paid = null;
+                if (e != null) {
+                    earned = parseNonNegativeDecimal(e);
+                    if (earned == null) issues.add("Invalid Earned amount '" + e + "' for " + MONTH_LABELS[month - 1]);
+                }
+                if (p != null) {
+                    paid = parseNonNegativeDecimal(p);
+                    if (paid == null) issues.add("Invalid Paid amount '" + p + "' for " + MONTH_LABELS[month - 1]);
+                }
+                amountsByMonth.put(month, new BigDecimal[]{earned, paid});
+            }
+
+            if (!issues.isEmpty()) {
+                errors.add(new ImportRowError(b.excelRow, b.label(), String.join("; ", issues)));
+                continue;
+            }
+            employeesWithData++;
+            for (Map.Entry<Integer, BigDecimal[]> e : amountsByMonth.entrySet()) {
+                entriesByMonth.computeIfAbsent(YearMonth.of(year, e.getKey()), k -> new ArrayList<>())
+                        .add(preparedEntry(employee, e.getValue()[0], e.getValue()[1]));
+            }
+        }
+
+        if (!errors.isEmpty()) {
+            errors.sort(java.util.Comparator.comparingInt(ImportRowError::row));
+            return new ImportResult(false, blocks.size(), 0, 0, errors);
+        }
+
+        List<PreparedRow> prepared = entriesByMonth.entrySet().stream()
+                .map(e -> new PreparedRow(e.getKey().getYear(), e.getKey().getMonthValue(), e.getValue()))
+                .toList();
+        applyPayRows(prepared, paidByName);
+        return new ImportResult(true, blocks.size(), employeesWithData, 0, List.of());
+    }
+
+    /** Recomputes formula cells (the client sums daily casual pay as e.g. =800+400+320) so their
+     *  values don't depend on the cached result the saving program stored — a file written by a
+     *  tool that doesn't calculate formulas would otherwise read every formula as 0. Falls back
+     *  to the cached values if evaluation fails (e.g. a link to another workbook). */
+    private static void recalculateFormulas(Workbook workbook) {
+        try {
+            workbook.getCreationHelper().createFormulaEvaluator().evaluateAll();
+        } catch (RuntimeException ignored) {
+            // keep cached values
+        }
+    }
+
+    private static final String[] MONTH_LABELS =
+            {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+
+    /** Columns of {@code header} whose text is exactly a month name or abbreviation ("Jan",
+     *  "January", "Sept") — stricter than {@link #parseMonth}, so a header like "Name" or "Mayor"
+     *  is never mistaken for a month. Column index -> month number. */
+    private static Map<Integer, Integer> monthColumns(Row header) {
+        Map<Integer, Integer> result = new LinkedHashMap<>();
+        for (int col = 0; col < header.getLastCellNum(); col++) {
+            String v = readCellAsString(header.getCell(col));
+            if (v == null) continue;
+            String key = v.trim().toLowerCase().replaceAll("[^a-z]", "");
+            for (int m = 0; m < 12; m++) {
+                String full = java.time.Month.of(m + 1).name().toLowerCase();
+                if (key.equals(full) || key.equals(full.substring(0, 3)) || (m == 8 && key.equals("sept"))) {
+                    result.put(col, m + 1);
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+
+    /** First column left of the months whose data cells say "Earned"/"Paid" — for sheets whose
+     *  label column has no recognizable header. */
+    private static Integer findEarnedPaidColumn(Sheet sheet, int headerRowNum, int firstMonthCol) {
+        for (int col = 0; col < firstMonthCol; col++) {
+            for (int r = headerRowNum + 1; r <= Math.min(sheet.getLastRowNum(), headerRowNum + 20); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                String v = readCellAsString(row.getCell(col));
+                if (v != null && (v.trim().equalsIgnoreCase("earned") || v.trim().equalsIgnoreCase("paid"))) {
+                    return col;
+                }
+            }
+        }
+        return null;
     }
 
     /**

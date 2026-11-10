@@ -417,6 +417,73 @@ public class ImportTemplateService {
         return count > 1 ? name + " (" + emp.getFarm().getName() + ")" : name;
     }
 
+    /**
+     * Casual pay template in the client's own "by employee" layout: one Earned row and one Paid
+     * row per employee, months Jan..Dec across the top, pre-filled with every active employee
+     * marked casual (including those also salaried), grouped by farm. Read by
+     * {@link BulkImportService#importPayByEmployeeFromXlsx}; the Type column is informational only.
+     */
+    @Transactional(readOnly = true)
+    public byte[] buildCasualPayTemplate() {
+        try (XSSFWorkbook wb = new XSSFWorkbook()) {
+            Styles styles = new Styles(wb);
+            Sheet sheet = wb.createSheet("Casual pay_import");
+
+            List<Employee> employees = employeeRepo.findAllOrderByFarmAndName().stream()
+                    .filter(e -> e.isActive() && e.isCasual())
+                    .toList();
+
+            String[] fixed = {"Employee", "Farm", "Type", "Earned/Paid"};
+            String[] months = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+            Row header = sheet.createRow(0);
+            for (int i = 0; i < fixed.length; i++) setCell(header, i, fixed[i], styles.header);
+            for (int i = 0; i < months.length; i++) setCell(header, fixed.length + i, months[i], styles.header);
+
+            int r = 1;
+            for (Employee emp : employees) {
+                Row earned = sheet.createRow(r);
+                Row paid = sheet.createRow(r + 1);
+                setCell(earned, 0, emp.getFullName(), styles.plain);
+                setCell(earned, 1, emp.getFarm().getName(), styles.plain);
+                setCell(earned, 2, emp.isSalaried() ? "Salaried + Casual" : "Casual", styles.plain);
+                setCell(earned, 3, "Earned", styles.plain);
+                setCell(paid, 3, "Paid", styles.plain);
+                for (int c = 0; c < 3; c++) {
+                    sheet.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(r, r + 1, c, c));
+                }
+                r += 2;
+            }
+
+            for (int i = 0; i < fixed.length; i++) sheet.autoSizeColumn(i);
+            sheet.createFreezePane(fixed.length, 1);
+
+            Sheet notes = wb.createSheet("Instructions");
+            writeInstructions(notes, styles, "Casual pay import (XLSX only)", List.of(
+                    "One Earned row and one Paid row per employee; one column per month (Jan to Dec). "
+                            + "This sheet is pre-filled with every active casual employee — delete rows for anyone "
+                            + "you don't need, and add rows (Employee, Farm, Earned/Paid) for anyone missing.",
+                    "The file has no year column: pick the year these figures belong to in the upload dialog. "
+                            + "One upload covers one year.",
+                    "Enter each month's total for that employee. Leave a month blank to leave it unchanged; "
+                            + "Earned and Paid can be filled independently. Excel formulas like =800+400 are fine.",
+                    "Employee and Farm must match the app exactly (spelling is checked, capitals and punctuation "
+                            + "are not). The Farm column may be left out entirely if no name is shared between farms.",
+                    "The Type column is for reference only and is ignored on upload.",
+                    "Casual-only employees go to the casual ledger. Employees who are also salaried go to Payroll "
+                            + "(Earned = gross salary, Paid = amount paid), the same as the Employee Pay import.",
+                    "Re-uploading the same employee/month replaces the figures from the previous upload — it never "
+                            + "adds them twice, and never touches payments recorded by hand in the app.",
+                    "If any row has a problem (unknown name, bad amount, an employee listed twice), nothing is "
+                            + "imported — fix the rows listed and upload again.",
+                    "Upload via ADMIN > Bulk Import > Casual Pay."
+            ));
+
+            return toBytes(wb);
+        } catch (IOException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not build template");
+        }
+    }
+
     // ── Shared helpers ───────────────────────────────────────────────────────
 
     private String farmNamesList() {

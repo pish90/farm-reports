@@ -528,6 +528,243 @@ class BulkImportServiceTest {
         verify(payrollRepo, never()).save(any());
     }
 
+    // ── Casual pay (by-employee layout) ──────────────────────────────────────
+
+    /** Builds a by-employee sheet. {@code withFarm} adds a Farm column (template layout);
+     *  without it the layout mirrors the client's own sheet: blank A1, "Month" in B1, names merged
+     *  down column A so the Paid row's name cell is blank. Each person: {name, farm, earned[], paid[]}
+     *  where index 0 = Jan; null = blank cell. */
+    private static MockMultipartFile byEmployeeSheet(boolean withFarm, Object[]... people) throws IOException {
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sheet = wb.createSheet("Sheet1");
+        int labelCol = withFarm ? 2 : 1;
+        Row header = sheet.createRow(0);
+        if (withFarm) {
+            header.createCell(0).setCellValue("Employee");
+            header.createCell(1).setCellValue("Farm");
+            header.createCell(2).setCellValue("Earned/Paid");
+        } else {
+            header.createCell(1).setCellValue("Month");
+        }
+        String[] months = {"Jan", "Feb", "Mar"};
+        for (int i = 0; i < months.length; i++) header.createCell(labelCol + 1 + i).setCellValue(months[i]);
+
+        int r = 1;
+        for (Object[] p : people) {
+            Row earned = sheet.createRow(r);
+            Row paid = sheet.createRow(r + 1);
+            earned.createCell(0).setCellValue((String) p[0]);
+            if (withFarm) earned.createCell(1).setCellValue((String) p[1]);
+            earned.createCell(labelCol).setCellValue("Earned");
+            paid.createCell(labelCol).setCellValue("Paid");
+            Double[] e = (Double[]) p[2], pd = (Double[]) p[3];
+            for (int i = 0; i < months.length; i++) {
+                if (e[i] != null) earned.createCell(labelCol + 1 + i).setCellValue(e[i]);
+                if (pd[i] != null) paid.createCell(labelCol + 1 + i).setCellValue(pd[i]);
+            }
+            sheet.addMergedRegion(new org.apache.poi.ss.util.CellRangeAddress(r, r + 1, 0, 0));
+            r += 2;
+        }
+        return toXlsx(wb, "casual_pay.xlsx");
+    }
+
+    private static Object[] person(String name, String farm, Double[] earned, Double[] paid) {
+        return new Object[]{name, farm, earned, paid};
+    }
+
+    @Test
+    void importPayByEmployee_clientLayout_writesCasualLedgerPerMonth() throws IOException {
+        MockMultipartFile file = byEmployeeSheet(false,
+                person("Jane Doe", null, new Double[]{1200.0, null, 800.0}, new Double[]{1200.0, null, null}));
+
+        Employee jane = employee(7, "LS2001M", matunda, "Jane", "Doe");
+        jane.setCasual(true);
+        when(employeeRepo.findAll()).thenReturn(List.of(jane));
+        when(employeeRepo.getReferenceById(7)).thenReturn(jane);
+        when(farmRepo.getReferenceById(1)).thenReturn(matunda);
+        when(casualSessionRepo.findByFarmIdAndSessionDateAndActivity(eq(1), any(), any()))
+                .thenReturn(Optional.empty());
+        when(casualSessionRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(casualPaymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(7), eq(1), any(), any()))
+                .thenReturn(List.of());
+
+        ImportResult result = bulkImportService.importPayByEmployeeFromXlsx(file, 2026, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.importedCount()).isEqualTo(1);
+
+        ArgumentCaptor<CasualWorkEntry> entryCaptor = ArgumentCaptor.forClass(CasualWorkEntry.class);
+        verify(casualEntryRepo, times(2)).save(entryCaptor.capture());
+        assertThat(entryCaptor.getAllValues()).extracting(e -> e.getSession().getSessionDate())
+                .containsExactly(LocalDate.of(2026, 1, 31), LocalDate.of(2026, 3, 31));
+        assertThat(entryCaptor.getAllValues()).extracting(CasualWorkEntry::getRateOverride)
+                .usingElementComparator(BigDecimal::compareTo)
+                .containsExactly(new BigDecimal("1200"), new BigDecimal("800"));
+
+        ArgumentCaptor<CasualLabourerPayment> paymentCaptor = ArgumentCaptor.forClass(CasualLabourerPayment.class);
+        verify(casualPaymentRepo, times(1)).save(paymentCaptor.capture()); // only Jan has a Paid figure
+        assertThat(paymentCaptor.getValue().getPaymentDate()).isEqualTo(LocalDate.of(2026, 1, 31));
+        assertThat(paymentCaptor.getValue().getAmount()).isEqualByComparingTo("1200");
+        verify(payrollRepo, never()).save(any());
+    }
+
+    @Test
+    void importPayByEmployee_salariedEmployee_goesToPayroll() throws IOException {
+        MockMultipartFile file = byEmployeeSheet(false,
+                person("Eric Terer", null, new Double[]{10800.0, null, null}, new Double[]{10000.0, null, null}));
+
+        Employee eric = employee(1, "LS2001K", matunda, "Eric", "Terer");
+        eric.setSalaried(true);
+        eric.setCasual(true); // dual type: salaried wins, same as the Employee Pay import
+        when(employeeRepo.findAll()).thenReturn(List.of(eric));
+        when(payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(1, 2026, 1, 1)).thenReturn(Optional.empty());
+        when(paymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(1), eq(1), any(), any()))
+                .thenReturn(List.of());
+
+        ImportResult result = bulkImportService.importPayByEmployeeFromXlsx(file, 2026, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<PayrollEntry> captor = ArgumentCaptor.forClass(PayrollEntry.class);
+        verify(payrollRepo).save(captor.capture());
+        assertThat(captor.getValue().getGrossSalary()).isEqualByComparingTo("10800");
+        assertThat(captor.getValue().getAmountPaid()).isEqualByComparingTo("10000");
+        verify(casualEntryRepo, never()).save(any());
+    }
+
+    @Test
+    void importPayByEmployee_farmColumn_disambiguatesAndIsStrict() throws IOException {
+        Farm lesB = new Farm();
+        lesB.setId(3);
+        lesB.setName("Les B");
+        Employee janeMatunda = employee(7, "LS2001M", matunda, "Jane", "Doe");
+        Employee janeLesB = employee(8, "LS2002B", lesB, "Jane", "Doe");
+        janeLesB.setCasual(true);
+        Employee bob = employee(9, "LS2003M", matunda, "Bob", "Smith");
+        when(employeeRepo.findAll()).thenReturn(List.of(janeMatunda, janeLesB, bob));
+
+        // Bob exists, but only on Matunda — an explicit Farm column must not fall back to another farm.
+        MockMultipartFile file = byEmployeeSheet(true,
+                person("Jane Doe", "Les B", new Double[]{500.0, null, null}, new Double[]{500.0, null, null}),
+                person("Bob Smith", "Les B", new Double[]{700.0, null, null}, new Double[]{700.0, null, null}));
+
+        ImportResult result = bulkImportService.importPayByEmployeeFromXlsx(file, 2026, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.errors()).hasSize(1);
+        assertThat(result.errors().get(0).row()).isEqualTo(4);
+        assertThat(result.errors().get(0).message()).contains("No employee named 'Bob Smith' on farm 'Les B'");
+        verify(casualEntryRepo, never()).save(any());
+        verify(payrollRepo, never()).save(any());
+    }
+
+    @Test
+    void importPayByEmployee_unknownAndDuplicateNames_reportErrorsAndWriteNothing() throws IOException {
+        Employee jane = employee(7, "LS2001M", matunda, "Jane", "Doe");
+        jane.setCasual(true);
+        when(employeeRepo.findAll()).thenReturn(List.of(jane));
+
+        MockMultipartFile file = byEmployeeSheet(false,
+                person("Jane Doe", null, new Double[]{100.0, null, null}, new Double[]{100.0, null, null}),
+                person("Jean Doe", null, new Double[]{200.0, null, null}, new Double[]{200.0, null, null}),
+                person("jane  doe", null, new Double[]{300.0, null, null}, new Double[]{300.0, null, null}),
+                person("Nobody Paid", null, new Double[]{null, null, null}, new Double[]{null, null, null}));
+
+        ImportResult result = bulkImportService.importPayByEmployeeFromXlsx(file, 2026, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isFalse();
+        assertThat(result.totalRows()).isEqualTo(4);
+        assertThat(result.errors()).extracting(e -> e.message())
+                .anySatisfy(m -> assertThat(m).contains("Unknown employee 'Jean Doe'"))
+                .anySatisfy(m -> assertThat(m).contains("Same employee as row 2"))
+                .noneSatisfy(m -> assertThat(m).contains("Nobody Paid")); // blank person is skipped, not an error
+        verify(casualEntryRepo, never()).save(any());
+        verify(casualPaymentRepo, never()).save(any());
+    }
+
+    @Test
+    void importPayByEmployee_formulaWithoutCachedValue_isRecalculatedNotReadAsZero() throws IOException {
+        XSSFWorkbook wb = new XSSFWorkbook();
+        Sheet sheet = wb.createSheet("Sheet1");
+        Row header = sheet.createRow(0);
+        header.createCell(1).setCellValue("Month");
+        header.createCell(2).setCellValue("Jan");
+        Row earned = sheet.createRow(1);
+        earned.createCell(0).setCellValue("Jane Doe");
+        earned.createCell(1).setCellValue("Earned");
+        earned.createCell(2).setCellFormula("800+400+320"); // never evaluated: no cached result stored
+        Row paid = sheet.createRow(2);
+        paid.createCell(1).setCellValue("Paid");
+        MockMultipartFile file = toXlsx(wb, "casual_pay.xlsx");
+
+        Employee jane = employee(7, "LS2001M", matunda, "Jane", "Doe");
+        jane.setCasual(true);
+        when(employeeRepo.findAll()).thenReturn(List.of(jane));
+        when(employeeRepo.getReferenceById(7)).thenReturn(jane);
+        when(farmRepo.getReferenceById(1)).thenReturn(matunda);
+        when(casualSessionRepo.findByFarmIdAndSessionDateAndActivity(eq(1), any(), any()))
+                .thenReturn(Optional.empty());
+        when(casualSessionRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        ImportResult result = bulkImportService.importPayByEmployeeFromXlsx(file, 2026, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        ArgumentCaptor<CasualWorkEntry> captor = ArgumentCaptor.forClass(CasualWorkEntry.class);
+        verify(casualEntryRepo).save(captor.capture());
+        assertThat(captor.getValue().getRateOverride()).isEqualByComparingTo("1520");
+    }
+
+    @Test
+    void importPayByEmployee_downloadedTemplate_roundTrips() throws IOException {
+        Farm lesB = new Farm();
+        lesB.setId(3);
+        lesB.setName("Les B");
+        Employee jane = employee(7, "LS2001B", lesB, "Jane", "Doe");
+        jane.setCasual(true);
+        Employee eric = employee(8, "LS2002B", lesB, "Eric", "Terer");
+        eric.setSalaried(true); // not casual: must not appear in the casual template
+        when(employeeRepo.findAllOrderByFarmAndName()).thenReturn(List.of(eric, jane));
+
+        ImportTemplateService templates = new ImportTemplateService(farmRepo, livestockTypeRepo, employeeRepo, expenseCategoryRepo);
+        XSSFWorkbook wb = new XSSFWorkbook(new java.io.ByteArrayInputStream(templates.buildCasualPayTemplate()));
+        Sheet sheet = wb.getSheetAt(0);
+        assertThat(sheet.getRow(1).getCell(0).getStringCellValue()).isEqualTo("Jane Doe");
+        assertThat(sheet.getLastRowNum()).isEqualTo(2); // header + one Earned/Paid pair
+        sheet.getRow(1).createCell(5).setCellValue(2500); // Earned, Feb (Employee, Farm, Type, Earned/Paid, Jan, Feb)
+        sheet.getRow(2).createCell(5).setCellValue(2000); // Paid, Feb
+        MockMultipartFile file = toXlsx(wb, "casual_pay_import_template.xlsx");
+
+        when(employeeRepo.findAll()).thenReturn(List.of(jane, eric));
+        when(employeeRepo.getReferenceById(7)).thenReturn(jane);
+        when(farmRepo.getReferenceById(3)).thenReturn(lesB);
+        when(casualSessionRepo.findByFarmIdAndSessionDateAndActivity(eq(3), any(), any()))
+                .thenReturn(Optional.empty());
+        when(casualSessionRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(casualPaymentRepo.findByEmployeeIdAndFarmIdAndPaymentDateBetween(eq(7), eq(3), any(), any()))
+                .thenReturn(List.of());
+
+        ImportResult result = bulkImportService.importPayByEmployeeFromXlsx(file, 2026, 42, "Peter Khayundi");
+
+        assertThat(result.success()).isTrue();
+        assertThat(result.importedCount()).isEqualTo(1);
+        ArgumentCaptor<CasualWorkEntry> entryCaptor = ArgumentCaptor.forClass(CasualWorkEntry.class);
+        verify(casualEntryRepo).save(entryCaptor.capture());
+        assertThat(entryCaptor.getValue().getSession().getSessionDate()).isEqualTo(LocalDate.of(2026, 2, 28));
+        assertThat(entryCaptor.getValue().getRateOverride()).isEqualByComparingTo("2500");
+        ArgumentCaptor<CasualLabourerPayment> paymentCaptor = ArgumentCaptor.forClass(CasualLabourerPayment.class);
+        verify(casualPaymentRepo).save(paymentCaptor.capture());
+        assertThat(paymentCaptor.getValue().getAmount()).isEqualByComparingTo("2000");
+    }
+
+    @Test
+    void importEmployeePay_byEmployeeFile_pointsToCasualPayTab() throws IOException {
+        MockMultipartFile file = byEmployeeSheet(false,
+                person("Jane Doe", null, new Double[]{100.0, null, null}, new Double[]{100.0, null, null}));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                        () -> bulkImportService.importEmployeePayFromXlsx(file, 2026, 1, 42, "Peter Khayundi"))
+                .hasMessageContaining("Casual Pay");
+    }
+
     // ── Expenses ─────────────────────────────────────────────────────────────
 
     private static ExpenseCategory category(int id, String code, String name) {
