@@ -79,6 +79,64 @@ class EmployeeServiceTest {
         kenlet.setName("Kenlet");
     }
 
+    private com.farmreports.api.entity.EmployeePayment payment(int id, int employeeId, String amount, String note) {
+        com.farmreports.api.entity.EmployeePayment p = new com.farmreports.api.entity.EmployeePayment();
+        p.setId(id);
+        p.setEmployeeId(employeeId);
+        p.setFarmId(1);
+        p.setPaymentDate(java.time.LocalDate.of(2026, 6, 30));
+        p.setAmount(new BigDecimal(amount));
+        p.setNote(note);
+        return p;
+    }
+
+    private com.farmreports.api.entity.PayrollEntry payrollJune(String gross, String loans, String paid) {
+        com.farmreports.api.entity.PayrollEntry e = new com.farmreports.api.entity.PayrollEntry();
+        e.setFarmId(1);
+        e.setYear(2026);
+        e.setMonth(6);
+        e.setEmployeeId(5);
+        e.setGrossSalary(new BigDecimal(gross));
+        e.setLoans(new BigDecimal(loans));
+        e.setAmountPaid(new BigDecimal(paid));
+        return e;
+    }
+
+    @Test
+    void deletePayment_importedPayment_isAlsoTakenOffPayroll() {
+        when(employeeRepo.findByIdAndFarmId(5, 1)).thenReturn(Optional.of(new Employee()));
+        when(paymentRepo.findByIdAndFarmId(9, 1)).thenReturn(Optional.of(payment(9, 5, "10000", BulkImportService.PAY_IMPORT_TAG)));
+        com.farmreports.api.entity.PayrollEntry june = payrollJune("12000", "500", "10000");
+        when(payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(1, 2026, 6, 5)).thenReturn(Optional.of(june));
+
+        employeeService.deletePayment(1, 5, 9);
+
+        verify(paymentRepo).delete(any());
+        verify(payrollRepo).save(june);
+        assertThat(june.getAmountPaid()).isEqualByComparingTo("0");
+        assertThat(june.getAmountRemaining()).isEqualByComparingTo("11500"); // 12000 - 500 loans - 0 paid
+    }
+
+    @Test
+    void deletePayment_handRecordedPayment_leavesPayrollAlone() {
+        when(employeeRepo.findByIdAndFarmId(5, 1)).thenReturn(Optional.of(new Employee()));
+        when(paymentRepo.findByIdAndFarmId(9, 1)).thenReturn(Optional.of(payment(9, 5, "3000", "Ledger adjustment")));
+
+        employeeService.deletePayment(1, 5, 9);
+
+        verify(paymentRepo).delete(any());
+        verifyNoInteractions(payrollRepo);
+    }
+
+    @Test
+    void deletePayment_ofAnotherEmployee_isNotFound() {
+        when(employeeRepo.findByIdAndFarmId(5, 1)).thenReturn(Optional.of(new Employee()));
+        when(paymentRepo.findByIdAndFarmId(9, 1)).thenReturn(Optional.of(payment(9, 6, "3000", null)));
+
+        assertThatThrownBy(() -> employeeService.deletePayment(1, 5, 9)).isInstanceOf(ResponseStatusException.class);
+        verify(paymentRepo, never()).delete(any());
+    }
+
     @Test
     void importEmployeesFromCsv_allValidRows_insertsAllAndReportsSuccess() {
         when(farmRepo.findAll()).thenReturn(List.of(matunda, lesA, kenlet));

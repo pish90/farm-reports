@@ -30,6 +30,7 @@ import java.io.StringReader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -694,6 +695,23 @@ public class EmployeeService {
                 .filter(p -> employeeId.equals(p.getEmployeeId()))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found"));
         paymentRepo.delete(payment);
+
+        // A spreadsheet-imported payment was also written to that month's payroll amount_paid
+        // (BulkImportService.upsertPayrollEntry) — take it off there too, or Payroll keeps showing it.
+        if (BulkImportService.PAY_IMPORT_TAG.equals(payment.getNote())) {
+            LocalDate d = payment.getPaymentDate();
+            payrollRepo.findByFarmIdAndYearAndMonthAndEmployeeId(farmId, d.getYear(), d.getMonthValue(), employeeId)
+                    .ifPresent(entry -> {
+                        BigDecimal paid = entry.getAmountPaid() != null ? entry.getAmountPaid() : BigDecimal.ZERO;
+                        BigDecimal newPaid = paid.subtract(payment.getAmount()).max(BigDecimal.ZERO);
+                        BigDecimal gross = entry.getGrossSalary() != null ? entry.getGrossSalary() : BigDecimal.ZERO;
+                        BigDecimal loans = entry.getLoans() != null ? entry.getLoans() : BigDecimal.ZERO;
+                        entry.setAmountPaid(newPaid);
+                        entry.setAmountRemaining(gross.subtract(loans).subtract(newPaid));
+                        entry.setUpdatedAt(LocalDateTime.now());
+                        payrollRepo.save(entry);
+                    });
+        }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
